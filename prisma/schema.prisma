@@ -1,0 +1,407 @@
+// ─────────────────────────────────────────────────────────────
+// NexFlow Platform — Prisma Schema
+// ─────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum IntegrationType {
+  GITHUB
+  JIRA
+  LINEAR
+  SLACK
+  GOOGLE_CALENDAR
+}
+
+enum IntegrationStatus {
+  CONNECTED
+  DISCONNECTED
+  PENDING
+}
+
+enum SprintStatus {
+  PLANNING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum Trend {
+  UP
+  DOWN
+  STABLE
+}
+
+enum ReportType {
+  WEEKLY_DIGEST
+  SPRINT_RISK
+  MONTHLY_HEALTH
+}
+
+enum ReportStatus {
+  DRAFT
+  GENERATED
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  DELIVERED
+}
+
+enum DeliveryChannel {
+  EMAIL
+  SLACK
+  IN_APP
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+// ─────────────────────────────────────────────────────────────
+// NextAuth Models
+// ─────────────────────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Organization
+// ─────────────────────────────────────────────────────────────
+
+model Organization {
+  id                String   @id @default(cuid())
+  name              String
+  slug              String   @unique
+  domain            String?
+  plan              String   @default("starter")
+  reportPreferences Json     @default("{}") @map("report_preferences")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  users              User[]
+  teams              Team[]
+  integrations       Integration[]
+  events             Event[]
+  sprints            Sprint[]
+  signals            Signal[]
+  reports            Report[]
+  clientOnboardings  ClientOnboarding[]
+  reportContexts     ReportContext[]
+
+  @@map("organizations")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Client Onboarding
+// ─────────────────────────────────────────────────────────────
+
+model ClientOnboarding {
+  id          String    @id @default(cuid())
+  orgId       String    @map("org_id")
+  token       String    @unique
+  email       String
+  clientName  String    @map("client_name")
+  status      String    @default("PENDING") // PENDING, COMPLETED
+  expiresAt   DateTime  @map("expires_at")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("client_onboardings")
+}
+
+// ─────────────────────────────────────────────────────────────
+// User
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  password      String?
+  role          Role      @default(MEMBER)
+  orgId         String?   @map("org_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  organization        Organization?        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  accounts            Account[]
+  sessions            Session[]
+  teams               Team[]               @relation("TeamMembers")
+  events              Event[]
+  reportDeliveries    ReportDelivery[]
+  deliveryPreferences DeliveryPreference[]
+  reviewedReports     Report[]             @relation("ReviewedReports")
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Team
+// ─────────────────────────────────────────────────────────────
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  orgId       String   @map("org_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  members      User[]       @relation("TeamMembers")
+  sprints      Sprint[]
+  reports      Report[]
+
+  @@map("teams")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Integration
+// ─────────────────────────────────────────────────────────────
+
+model Integration {
+  id           String            @id @default(cuid())
+  type         IntegrationType
+  status       IntegrationStatus @default(DISCONNECTED)
+  config       Json              @default("{}")
+  accessToken  String?           @map("access_token") @db.Text
+  refreshToken String?           @map("refresh_token") @db.Text
+  expiresAt    DateTime?         @map("expires_at")
+  orgId        String            @map("org_id")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, type])
+  @@map("integrations")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Event
+// ─────────────────────────────────────────────────────────────
+
+model Event {
+  id          String          @id @default(cuid())
+  externalId  String          @map("external_id")
+  source      IntegrationType
+  type        String
+  title       String
+  description String?
+  metadata    Json            @default("{}")
+  timestamp   DateTime
+  userId      String?         @map("user_id")
+  orgId       String          @map("org_id")
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, source, timestamp])
+  @@index([orgId, type, timestamp])
+  @@map("events")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Sprint
+// ─────────────────────────────────────────────────────────────
+
+model Sprint {
+  id         String       @id @default(cuid())
+  externalId String?      @map("external_id")
+  name       String
+  goal       String?
+  status     SprintStatus @default(PLANNING)
+  startDate  DateTime     @map("start_date")
+  endDate    DateTime     @map("end_date")
+  riskScore  Float        @default(0) @map("risk_score")
+  metadata   Json         @default("{}")
+  teamId     String       @map("team_id")
+  orgId      String       @map("org_id")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  team         Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  signals      Signal[]
+
+  @@map("sprints")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Signal
+// ─────────────────────────────────────────────────────────────
+
+model Signal {
+  id         String   @id @default(cuid())
+  name       String
+  category   String
+  value      Float
+  weight     Float    @default(1.0)
+  trend      Trend    @default(STABLE)
+  metadata   Json     @default("{}")
+  sprintId   String?  @map("sprint_id")
+  orgId      String   @map("org_id")
+  computedAt DateTime @default(now()) @map("computed_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  sprint       Sprint?      @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("signals")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Report
+// ─────────────────────────────────────────────────────────────
+
+model Report {
+  id          String       @id @default(cuid())
+  type        ReportType
+  title       String
+  summary     String?
+  content     Json
+  aiNarrative String?      @map("ai_narrative") @db.Text
+  status      ReportStatus @default(DRAFT)
+  periodStart DateTime     @map("period_start")
+  periodEnd   DateTime     @map("period_end")
+  generatedAt DateTime?    @map("generated_at")
+  orgId       String       @map("org_id")
+  teamId      String?      @map("team_id")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  reviewedById String?   @map("reviewed_by_id")
+  reviewedAt   DateTime? @map("reviewed_at")
+  reviewNotes  String?   @map("review_notes") @db.Text
+
+  organization Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  team         Team?            @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  reviewedBy   User?            @relation("ReviewedReports", fields: [reviewedById], references: [id], onDelete: SetNull)
+  deliveries   ReportDelivery[]
+  contexts     ReportContext[]
+
+  @@map("reports")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Report Delivery
+// ─────────────────────────────────────────────────────────────
+
+model ReportDelivery {
+  id             String          @id @default(cuid())
+  reportId       String          @map("report_id")
+  channel        DeliveryChannel @default(IN_APP)
+  recipientId    String?         @map("recipient_id")
+  recipientEmail String?         @map("recipient_email")
+  status         DeliveryStatus  @default(PENDING)
+  sentAt         DateTime?       @map("sent_at")
+  error          String?
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  report    Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  recipient User?  @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+
+  @@map("report_deliveries")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Report Context — persists key metrics & insights across reports
+// ─────────────────────────────────────────────────────────────
+
+model ReportContext {
+  id          String   @id @default(cuid())
+  orgId       String   @map("org_id")
+  reportId    String   @map("report_id")
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+  keyMetrics  Json     @map("key_metrics")  // snapshot of top KPIs
+  insights    Json     @default("[]")       // AI-identified trends & observations
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  report       Report       @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@map("report_contexts")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Delivery Preference
+// ─────────────────────────────────────────────────────────────
+
+model DeliveryPreference {
+  id         String          @id @default(cuid())
+  userId     String          @map("user_id")
+  reportType ReportType      @map("report_type")
+  channel    DeliveryChannel
+  enabled    Boolean         @default(true)
+  createdAt  DateTime        @default(now()) @map("created_at")
+  updatedAt  DateTime        @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, reportType, channel])
+  @@map("delivery_preferences")
+}
