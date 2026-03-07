@@ -84,9 +84,8 @@ const INTEGRATIONS: IntegrationDef[] = [
     id: "gcal",
     type: "GOOGLE_CALENDAR",
     name: "Google Calendar",
-    description: "Coming soon",
+    description: "Meeting load analysis",
     icon: <Calendar className="h-5 w-5" />,
-    disabled: true,
   },
 ]
 
