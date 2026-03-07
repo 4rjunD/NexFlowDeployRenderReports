@@ -2,7 +2,8 @@
 // Server-side PDF generation via Puppeteer
 // ─────────────────────────────────────────────────────────────
 
-import puppeteer from "puppeteer";
+import puppeteerCore from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 
 /**
  * Takes full HTML string, renders it in a headless browser, and returns a PDF Buffer.
@@ -15,10 +16,25 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
     "/* fonts stripped for PDF */"
   );
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-web-security"],
-  });
+  const isProduction = process.env.NODE_ENV === "production";
+
+  let browser;
+  if (isProduction) {
+    // Serverless/Render: use @sparticuz/chromium
+    browser = await puppeteerCore.launch({
+      args: chromium.args,
+      defaultViewport: { width: 1280, height: 720 },
+      executablePath: await chromium.executablePath(),
+      headless: true as any,
+    });
+  } else {
+    // Local dev: use system-installed Chromium via puppeteer
+    const puppeteer = (await import("puppeteer")).default;
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-web-security"],
+    });
+  }
 
   try {
     const page = await browser.newPage();
