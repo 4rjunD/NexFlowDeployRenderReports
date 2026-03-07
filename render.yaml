@@ -3,8 +3,8 @@ services:
     name: nexflow-platform
     runtime: node
     plan: starter
-    buildCommand: npm install --legacy-peer-deps && npx prisma generate && npm run build
-    startCommand: npx prisma db push --skip-generate && npm start
+    buildCommand: pnpm install && npx prisma generate && pnpm build
+    startCommand: npx prisma db push --skip-generate && pnpm start
     envVars:
       - key: NODE_ENV
         value: production

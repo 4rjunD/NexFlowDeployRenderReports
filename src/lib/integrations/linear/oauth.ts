@@ -1,7 +1,7 @@
 const LINEAR_AUTH_URL = "https://linear.app/oauth/authorize";
 const LINEAR_TOKEN_URL = "https://api.linear.app/oauth/token";
 
-const SCOPES = ["read"];
+const SCOPES = ["read", "write", "issues:create", "comments:create", "admin"];
 
 const CALLBACK_URL = `${process.env.NEXT_PUBLIC_APP_URL}/api/callback/linear`;
 

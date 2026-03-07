@@ -3,11 +3,23 @@
 // ─────────────────────────────────────────────────────────────
 
 const SLACK_SCOPES = [
-  "channels:read",
-  "channels:history",
-  "users:read",
-  "users:read.email",
-  "team:read",
+  "channels:read",         // List all channels
+  "channels:history",      // Read messages in public channels
+  "groups:read",           // List private channels
+  "groups:history",        // Read messages in private channels
+  "im:read",              // List DMs
+  "im:history",           // Read DM messages
+  "mpim:read",            // List group DMs
+  "mpim:history",         // Read group DM messages
+  "users:read",           // Read user profiles
+  "users:read.email",     // Read user emails
+  "users.profile:read",   // Read detailed user profiles
+  "team:read",            // Read workspace info
+  "reactions:read",       // Read message reactions
+  "files:read",           // Read files shared
+  "pins:read",            // Read pinned messages
+  "usergroups:read",      // Read user groups
+  "emoji:read",           // Read custom emoji
 ].join(",")
 
 const SLACK_AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
