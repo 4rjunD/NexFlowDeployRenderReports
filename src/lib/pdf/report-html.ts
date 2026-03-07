@@ -62,6 +62,154 @@ export function computeKPIs(integrationData: Record<string, any>) {
   return kpis.slice(0, 6);
 }
 
+// ── Visual diagrams built from real data ──
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildVisualCharts(integrationData: Record<string, any>): string {
+  let html = "";
+  const gh = integrationData.github;
+  const sl = integrationData.slack;
+  const ln = integrationData.linear;
+
+  // 1. PR Activity horizontal bar chart (opened vs merged by author)
+  if (gh) {
+    const pr = typeof gh.pullRequests === "object" ? gh.pullRequests : {};
+    const openedByAuthor = pr.openedByAuthor || {};
+    const mergedByAuthor = pr.mergedByAuthor || {};
+    const authors = Array.from(new Set([...Object.keys(openedByAuthor), ...Object.keys(mergedByAuthor)]));
+    const withActivity = authors.filter(a => n(openedByAuthor[a]) > 0 || n(mergedByAuthor[a]) > 0);
+
+    if (withActivity.length > 0) {
+      const maxVal = Math.max(...withActivity.map(a => Math.max(n(openedByAuthor[a]), n(mergedByAuthor[a]))));
+      const barScale = (v: number) => maxVal > 0 ? Math.round((v / maxVal) * 100) : 0;
+
+      html += `<div class="chart-section">`;
+      html += `<h3 class="ss-title">PR Activity by Contributor</h3>`;
+      html += `<div class="chart-legend"><span class="legend-item"><span class="legend-dot" style="background:#1a1a1a"></span>Opened</span><span class="legend-item"><span class="legend-dot" style="background:#888"></span>Merged</span></div>`;
+      html += `<div class="hbar-chart">`;
+      for (const a of withActivity.sort((x, y) => n(openedByAuthor[y]) - n(openedByAuthor[x])).slice(0, 10)) {
+        const opened = n(openedByAuthor[a]);
+        const merged = n(mergedByAuthor[a]);
+        html += `<div class="hbar-row">
+          <div class="hbar-label">${esc(a)}</div>
+          <div class="hbar-bars">
+            <div class="hbar-bar" style="width:${barScale(opened)}%;background:#1a1a1a"></div>
+            <div class="hbar-bar" style="width:${barScale(merged)}%;background:#888;margin-top:2px"></div>
+          </div>
+          <div class="hbar-vals">${opened} / ${merged}</div>
+        </div>`;
+      }
+      html += `</div></div>`;
+    }
+
+    // 2. Review distribution donut chart
+    const byReviewer = (typeof gh.reviews === "object" ? gh.reviews : {}).byReviewer || {};
+    const reviewers = Object.entries(byReviewer).filter(([, c]) => n(c) > 0).sort((a, b) => n(b[1]) - n(a[1]));
+    if (reviewers.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const totalReviews = reviewers.reduce((s, [, c]) => s + n(c), 0);
+      const grays = ["#1a1a1a", "#444", "#666", "#888", "#aaa", "#ccc", "#ddd", "#e5e5e5"];
+      let cumulativeAngle = 0;
+      const segments: string[] = [];
+      const legendItems: string[] = [];
+
+      reviewers.slice(0, 8).forEach(([name, count], i) => {
+        const pct = n(count) / totalReviews;
+        const angle = pct * 360;
+        const startAngle = cumulativeAngle;
+        const endAngle = cumulativeAngle + angle;
+        const largeArc = angle > 180 ? 1 : 0;
+        const color = grays[i % grays.length];
+
+        const startRad = (startAngle - 90) * (Math.PI / 180);
+        const endRad = (endAngle - 90) * (Math.PI / 180);
+        const x1 = 50 + 40 * Math.cos(startRad);
+        const y1 = 50 + 40 * Math.sin(startRad);
+        const x2 = 50 + 40 * Math.cos(endRad);
+        const y2 = 50 + 40 * Math.sin(endRad);
+
+        segments.push(`<path d="M50,50 L${x1},${y1} A40,40 0 ${largeArc},1 ${x2},${y2} Z" fill="${color}"/>`);
+        legendItems.push(`<span class="legend-item"><span class="legend-dot" style="background:${color}"></span>${esc(name)} (${Math.round(pct * 100)}%)</span>`);
+        cumulativeAngle = endAngle;
+      });
+
+      html += `<div class="chart-section">`;
+      html += `<h3 class="ss-title">Review Load Distribution</h3>`;
+      html += `<div class="donut-row">`;
+      html += `<svg viewBox="0 0 100 100" class="donut-svg">${segments.join("")}<circle cx="50" cy="50" r="22" fill="white"/><text x="50" y="48" text-anchor="middle" font-size="12" font-weight="700" fill="#1a1a1a">${totalReviews}</text><text x="50" y="57" text-anchor="middle" font-size="5" fill="#888">reviews</text></svg>`;
+      html += `<div class="donut-legend">${legendItems.join("")}</div>`;
+      html += `</div></div>`;
+    }
+  }
+
+  // 3. Commit volume by author — horizontal bars
+  if (gh) {
+    const commitsByAuthor = gh.commits?.byAuthor || {};
+    const commitAuthors = Object.entries(commitsByAuthor).filter(([, c]) => n(c) > 0).sort((a, b) => n(b[1]) - n(a[1])).slice(0, 10);
+    if (commitAuthors.length > 0) {
+      const maxCommits = n(commitAuthors[0][1]);
+      html += `<div class="chart-section">`;
+      html += `<h3 class="ss-title">Commit Volume by Contributor</h3>`;
+      html += `<div class="hbar-chart">`;
+      for (const [author, count] of commitAuthors) {
+        const width = maxCommits > 0 ? Math.round((n(count) / maxCommits) * 100) : 0;
+        html += `<div class="hbar-row">
+          <div class="hbar-label">${esc(author)}</div>
+          <div class="hbar-bars"><div class="hbar-bar" style="width:${width}%;background:#1a1a1a"></div></div>
+          <div class="hbar-vals">${count}</div>
+        </div>`;
+      }
+      html += `</div></div>`;
+    }
+  }
+
+  // 4. Slack channel activity — top channels bar chart
+  if (sl?.channelBreakdown) {
+    const channels = Object.entries(sl.channelBreakdown as Record<string, number>)
+      .filter(([, c]) => n(c) > 0)
+      .sort((a, b) => n(b[1]) - n(a[1]))
+      .slice(0, 8);
+    if (channels.length > 0) {
+      const maxMsgs = n(channels[0][1]);
+      html += `<div class="chart-section">`;
+      html += `<h3 class="ss-title">Most Active Slack Channels</h3>`;
+      html += `<div class="hbar-chart">`;
+      for (const [channel, count] of channels) {
+        const width = maxMsgs > 0 ? Math.round((n(count) / maxMsgs) * 100) : 0;
+        html += `<div class="hbar-row">
+          <div class="hbar-label">#${esc(channel)}</div>
+          <div class="hbar-bars"><div class="hbar-bar" style="width:${width}%;background:#1a1a1a"></div></div>
+          <div class="hbar-vals">${n(count).toLocaleString()}</div>
+        </div>`;
+      }
+      html += `</div></div>`;
+    }
+  }
+
+  // 5. Linear issues by priority — stacked mini bar
+  if (ln?.issues?.byPriority) {
+    const priorities = Object.entries(ln.issues.byPriority as Record<string, number>).filter(([, c]) => n(c) > 0);
+    if (priorities.length > 0) {
+      const total = priorities.reduce((s, [, c]) => s + n(c), 0);
+      const priColors: Record<string, string> = { Urgent: "#1a1a1a", High: "#444", Medium: "#888", Low: "#bbb", "No priority": "#ddd" };
+      html += `<div class="chart-section">`;
+      html += `<h3 class="ss-title">Issue Priority Breakdown</h3>`;
+      html += `<div class="stacked-bar">`;
+      for (const [pri, count] of priorities) {
+        const pct = Math.round((n(count) / total) * 100);
+        if (pct > 0) {
+          html += `<div class="stacked-seg" style="width:${pct}%;background:${priColors[pri] || "#888"}" title="${pri}: ${count}"></div>`;
+        }
+      }
+      html += `</div>`;
+      html += `<div class="chart-legend">${priorities.map(([pri, count]) => `<span class="legend-item"><span class="legend-dot" style="background:${priColors[pri] || "#888"}"></span>${esc(pri)}: ${count}</span>`).join("")}</div>`;
+      html += `</div>`;
+    }
+  }
+
+  return html;
+}
+
 function formatInline(text: string): string {
   let result = text.replace(/:::highlight\[([^\]]+)\]/g, '<span class="hl">$1</span>');
   result = result.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
@@ -152,9 +300,10 @@ export function buildDataTables(integrationData: Record<string, any>): string {
     if (Object.keys(openedByAuthor).length > 0) {
       html += `<h3 class="ss-title">Exhibit A: PR Activity by Author</h3>`;
       html += `<table class="tbl"><thead><tr><th>Author</th><th>Opened</th><th>Merged</th></tr></thead><tbody>`;
-      const authors = Array.from(new Set([...Object.keys(openedByAuthor), ...Object.keys(mergedByAuthor)]));
+      const authors = Array.from(new Set([...Object.keys(openedByAuthor), ...Object.keys(mergedByAuthor)]))
+        .filter(a => n(openedByAuthor[a]) > 0 || n(mergedByAuthor[a]) > 0);
       for (const a of authors) {
-        html += `<tr><td>${esc(a)}</td><td>${openedByAuthor[a] || 0}</td><td>${mergedByAuthor[a] || 0}</td></tr>`;
+        html += `<tr><td>${esc(a)}</td><td>${n(openedByAuthor[a]) || "—"}</td><td>${n(mergedByAuthor[a]) || "—"}</td></tr>`;
       }
       html += `</tbody></table>`;
     }
@@ -350,6 +499,26 @@ const CSS = `
   /* ── Progression ── */
   .prog-section { margin-top: 12px; }
 
+  /* ── Charts & Visuals ── */
+  .chart-section { margin: 14px 0; }
+  .chart-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 10px; color: #666; margin: 4px 0 6px; }
+  .legend-item { display: inline-flex; align-items: center; gap: 4px; }
+  .legend-dot { width: 8px; height: 8px; display: inline-block; flex-shrink: 0; }
+
+  .hbar-chart { margin: 6px 0; }
+  .hbar-row { display: flex; align-items: center; margin-bottom: 4px; }
+  .hbar-label { width: 120px; font-size: 11px; color: #333; font-weight: 500; text-align: right; padding-right: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+  .hbar-bars { flex: 1; }
+  .hbar-bar { height: 10px; min-width: 2px; }
+  .hbar-vals { width: 50px; font-size: 10px; color: #888; text-align: right; padding-left: 6px; flex-shrink: 0; }
+
+  .donut-row { display: flex; align-items: center; gap: 20px; margin: 6px 0; }
+  .donut-svg { width: 100px; height: 100px; flex-shrink: 0; }
+  .donut-legend { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
+
+  .stacked-bar { display: flex; height: 16px; margin: 6px 0; overflow: hidden; }
+  .stacked-seg { height: 100%; }
+
   /* ── Footer ── */
   .rpt-footer { display: flex; justify-content: space-between; margin-top: 20px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 9px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
 
@@ -393,6 +562,7 @@ export function buildReportHtml(opts: ReportHtmlOptions): string {
 
   const narrativeHtml = aiNarrative ? renderNarrative(aiNarrative) : "<p class=\"p\">Report content is being generated.</p>";
   const dataTablesHtml = buildDataTables(integrationData);
+  const visualChartsHtml = buildVisualCharts(integrationData);
   const healthScoreHtml = healthScore ? buildHealthScoreSection(healthScore) : "";
   const progressionHtml = buildProgressionSection();
 
@@ -441,6 +611,8 @@ ${showDownloadBar ? `<div class="download-bar no-print">
   </div>` : ""}
 
   ${narrativeHtml}
+
+  ${visualChartsHtml ? `<div class="page-break"></div><h2 class="s-title">Engineering Activity</h2><div class="s-rule"></div>${visualChartsHtml}` : ""}
 
   ${dataTablesHtml ? `<div class="page-break"></div><h2 class="s-title">Data Appendix</h2><div class="s-rule"></div>${dataTablesHtml}` : ""}
 
