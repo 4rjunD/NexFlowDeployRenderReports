@@ -47,6 +47,16 @@ async function tryCollectLinearMetrics(accessToken: string, since: string): Prom
   }
 }
 
+async function tryCollectJiraMetrics(accessToken: string, since: string): Promise<MetricsResult | null> {
+  try {
+    const mod = await import("@/lib/integrations/jira/metrics");
+    return await mod.collectJiraMetrics(accessToken, since);
+  } catch (error) {
+    console.warn("[NexFlow] Jira metrics:", (error as Error).message);
+    return null;
+  }
+}
+
 async function tryCollectGoogleCalendarMetrics(accessToken: string, since: string): Promise<MetricsResult | null> {
   try {
     const mod = await import("@/lib/integrations/google/metrics");
@@ -183,6 +193,11 @@ async function generateReportInBackground(reportId: string, orgId: string) {
           );
           break;
         }
+        case "JIRA":
+          metricsPromises.push(
+            tryCollectJiraMetrics(accessToken, sinceIso).then((data) => { integrationData.jira = data; })
+          );
+          break;
         case "LINEAR":
           metricsPromises.push(
             tryCollectLinearMetrics(accessToken, sinceIso).then((data) => { integrationData.linear = data; })

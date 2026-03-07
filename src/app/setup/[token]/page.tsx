@@ -15,6 +15,7 @@ import {
   FileText,
   ExternalLink,
   PenLine,
+  SquareKanban,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -72,6 +73,13 @@ const INTEGRATIONS: IntegrationDef[] = [
     name: "Slack",
     description: "Team communication patterns",
     icon: <MessageSquare className="h-5 w-5" />,
+  },
+  {
+    id: "jira",
+    type: "JIRA",
+    name: "Jira",
+    description: "Issue, sprint, and project tracking",
+    icon: <SquareKanban className="h-5 w-5" />,
   },
   {
     id: "linear",
@@ -185,6 +193,7 @@ export default function SetupPage() {
     const routeMap: Record<string, string> = {
       GITHUB: "github",
       SLACK: "slack",
+      JIRA: "jira",
       LINEAR: "linear",
       GOOGLE_CALENDAR: "google",
     }

@@ -25,15 +25,22 @@ export function computeKPIs(integrationData: Record<string, any>) {
   const gh = integrationData.github;
   const sl = integrationData.slack;
   const ln = integrationData.linear;
+  const jr = integrationData.jira;
   const cal = integrationData.googleCalendar;
 
-  if (ln) {
-    const issues = ln.issues || {};
+  // Prefer Jira issues over Linear if both exist
+  const issueSource = jr || ln;
+  if (issueSource) {
+    const issues = issueSource.issues || {};
     const total = n(issues.total);
     const completed = n(issues.completed);
     if (total > 0) {
       const pct = Math.round((completed / total) * 100);
       kpis.push({ label: "Issue Completion", value: `${pct}%`, detail: `${completed} of ${total} issues` });
+    }
+    const resTime = n(issues.avgResolutionTimeHours);
+    if (resTime > 0) {
+      kpis.push({ label: "Avg Resolution", value: resTime < 24 ? `${fmt(resTime)}h` : `${fmt(resTime / 24)}d`, detail: "time to resolve" });
     }
   }
   if (gh) {
@@ -186,9 +193,10 @@ function buildVisualCharts(integrationData: Record<string, any>): string {
     }
   }
 
-  // 5. Linear issues by priority — stacked mini bar
-  if (ln?.issues?.byPriority) {
-    const priorities = Object.entries(ln.issues.byPriority as Record<string, number>).filter(([, c]) => n(c) > 0);
+  // 5. Issue priority — stacked mini bar (Jira or Linear)
+  const issueSrc = integrationData.jira || ln;
+  if (issueSrc?.issues?.byPriority) {
+    const priorities = Object.entries(issueSrc.issues.byPriority as Record<string, number>).filter(([, c]) => n(c) > 0);
     if (priorities.length > 0) {
       const total = priorities.reduce((s, [, c]) => s + n(c), 0);
       const priColors: Record<string, string> = { Urgent: "#1a1a1a", High: "#444", Medium: "#888", Low: "#bbb", "No priority": "#ddd" };
@@ -321,22 +329,47 @@ export function buildDataTables(integrationData: Record<string, any>): string {
     }
   }
 
+  // Issue tables — use Jira or Linear, whichever is available
+  const issueData = integrationData.jira || ln;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (ln?.issues?.byAssignee && Object.keys(ln.issues.byAssignee).length > 0) {
-    html += `<h3 class="ss-title">Exhibit C: Issue Workload by Assignee</h3>`;
+  if (issueData?.issues?.byAssignee && Object.keys(issueData.issues.byAssignee).length > 0) {
+    const source = integrationData.jira ? "Jira" : "Linear";
+    html += `<h3 class="ss-title">Exhibit C: ${source} Issue Workload by Assignee</h3>`;
     html += `<table class="tbl"><thead><tr><th>Assignee</th><th>Total</th><th>Done</th><th>In Progress</th></tr></thead><tbody>`;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const [name, stats] of Object.entries(ln.issues.byAssignee) as [string, any][]) {
-      html += `<tr><td>${esc(name)}</td><td>${stats.total}</td><td>${stats.completed}</td><td>${stats.inProgress}</td></tr>`;
+    for (const [name, stats] of Object.entries(issueData.issues.byAssignee) as [string, any][]) {
+      if (n(stats.total) > 0) {
+        html += `<tr><td>${esc(name)}</td><td>${stats.total}</td><td>${stats.completed}</td><td>${stats.inProgress}</td></tr>`;
+      }
     }
     html += `</tbody></table>`;
   }
 
-  if (ln?.issues?.byPriority && Object.keys(ln.issues.byPriority).length > 0) {
+  if (issueData?.issues?.byPriority && Object.keys(issueData.issues.byPriority).length > 0) {
     html += `<h3 class="ss-title">Exhibit D: Issues by Priority</h3>`;
     html += `<table class="tbl"><thead><tr><th>Priority</th><th>Count</th></tr></thead><tbody>`;
-    for (const [pri, count] of Object.entries(ln.issues.byPriority)) {
-      html += `<tr><td>${esc(pri)}</td><td>${count}</td></tr>`;
+    for (const [pri, count] of Object.entries(issueData.issues.byPriority)) {
+      if (n(count) > 0) html += `<tr><td>${esc(pri)}</td><td>${count}</td></tr>`;
+    }
+    html += `</tbody></table>`;
+  }
+
+  // Jira-specific: issue type breakdown
+  if (integrationData.jira?.issues?.byType && Object.keys(integrationData.jira.issues.byType).length > 0) {
+    html += `<h3 class="ss-title">Exhibit E: Issues by Type</h3>`;
+    html += `<table class="tbl"><thead><tr><th>Type</th><th>Count</th></tr></thead><tbody>`;
+    for (const [type, count] of Object.entries(integrationData.jira.issues.byType).sort((a, b) => n(b[1]) - n(a[1]))) {
+      if (n(count) > 0) html += `<tr><td>${esc(type)}</td><td>${count}</td></tr>`;
+    }
+    html += `</tbody></table>`;
+  }
+
+  // Jira sprint history
+  if (integrationData.jira?.sprints?.recentClosed?.length > 0) {
+    html += `<h3 class="ss-title">Exhibit F: Recent Sprint Completion</h3>`;
+    html += `<table class="tbl"><thead><tr><th>Sprint</th><th>Total</th><th>Completed</th><th>Rate</th></tr></thead><tbody>`;
+    for (const s of integrationData.jira.sprints.recentClosed) {
+      html += `<tr><td>${esc(s.name)}</td><td>${s.totalIssues}</td><td>${s.completedIssues}</td><td>${s.completionRate}%</td></tr>`;
     }
     html += `</tbody></table>`;
   }
