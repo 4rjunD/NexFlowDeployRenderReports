@@ -3,12 +3,10 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/db/prisma";
 import { sendReportEmail } from "@/lib/email/send";
-import { buildReportHtml, computeKPIs } from "@/lib/pdf/report-html";
-import { htmlToPdf } from "@/lib/pdf/generate";
+import { computeKPIs } from "@/lib/pdf/report-html";
 import { computeHealthScore } from "@/lib/scoring/health-score";
 import { deliverReportToSlack } from "@/lib/delivery/slack";
 
-// B3: Multi-recipient delivery — accepts array of recipients
 const deliverSchema = z.object({
   recipientEmail: z.string().email().optional(),
   recipients: z.array(z.string().email()).optional(),
@@ -61,11 +59,10 @@ export async function POST(
       );
     }
 
-    // Build recipient list — backward compatible with single recipientEmail
+    // Build recipient list
     const emailRecipients: string[] = [];
     if (parsed.data.recipientEmail) emailRecipients.push(parsed.data.recipientEmail);
     if (parsed.data.recipients) emailRecipients.push(...parsed.data.recipients);
-    // Deduplicate
     const uniqueEmails = Array.from(new Set(emailRecipients));
 
     const slackChannel = parsed.data.slackChannel;
@@ -73,7 +70,6 @@ export async function POST(
     const orgName = report.organization?.name || "Your Organization";
     const integrationData = content.integrationData || {};
 
-    // Determine if this is the first report for the org
     const priorDeliveries = await prisma.reportDelivery.count({
       where: {
         report: { orgId: report.organization?.id },
@@ -82,39 +78,29 @@ export async function POST(
     });
     const isFirstReport = priorDeliveries === 0;
     const healthScore = computeHealthScore(integrationData, isFirstReport);
-
-    // Generate the PDF (only if email recipients exist)
-    let pdfBuffer: Buffer | null = null;
-    if (uniqueEmails.length > 0) {
-      const reportHtml = buildReportHtml({
-        title: report.title,
-        orgName,
-        periodStart: report.periodStart,
-        periodEnd: report.periodEnd,
-        generatedAt: report.generatedAt,
-        aiNarrative: report.aiNarrative,
-        content,
-        showDownloadBar: false,
-        healthScore,
-      });
-
-      try {
-        pdfBuffer = await htmlToPdf(reportHtml);
-      } catch (pdfError) {
-        console.error("[NexFlow] PDF generation failed:", pdfError);
-        return NextResponse.json(
-          { error: "Failed to generate PDF. Please try again." },
-          { status: 500 }
-        );
-      }
-    }
-
-    // Extract KPIs for the email preview
     const kpis = computeKPIs(integrationData);
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
+
+    // Extract top discoveries for email preview
+    const topDiscoveries: string[] = [];
+    if (content.blockers?.blockers?.length) {
+      topDiscoveries.push(`${content.blockers.blockers.length} blocker signals detected in Slack`);
+    }
+    const jira = integrationData.jira as Record<string, any> | undefined;
+    if (jira?.issues?.overdue?.length) {
+      topDiscoveries.push(`${jira.issues.overdue.length} overdue tickets need attention`);
+    }
+    const gh = integrationData.github as Record<string, any> | undefined;
+    if (gh?.pullRequests?.stalePrs?.length) {
+      topDiscoveries.push(`${gh.pullRequests.stalePrs.length} PRs stale for 7+ days`);
+    }
+    if (gh?.pullRequests?.merged) {
+      topDiscoveries.push(`${gh.pullRequests.merged} PRs merged this period`);
+    }
 
     const results: { recipient: string; channel: string; status: string; error?: string }[] = [];
 
-    // B3: Send emails in parallel to all recipients
+    // Send emails — each recipient gets their own delivery record (used as view token)
     const emailPromises = uniqueEmails.map(async (email) => {
       const delivery = await prisma.reportDelivery.create({
         data: {
@@ -125,6 +111,10 @@ export async function POST(
         },
       });
 
+      // Build unique view URLs using the delivery ID as token
+      const reportViewUrl = `${baseUrl}/api/reports/${report.id}/view?token=${delivery.id}`;
+      const pdfDownloadUrl = `${baseUrl}/api/reports/${report.id}/view?token=${delivery.id}&format=pdf`;
+
       try {
         await sendReportEmail({
           to: email,
@@ -132,8 +122,10 @@ export async function POST(
           reportTitle: report.title,
           orgName,
           kpis,
-          pdfBuffer: pdfBuffer!,
+          reportViewUrl,
+          pdfDownloadUrl,
           healthScore,
+          topDiscoveries: topDiscoveries.slice(0, 3),
         });
 
         await prisma.reportDelivery.update({
@@ -159,7 +151,7 @@ export async function POST(
       }
     });
 
-    // B1: Slack delivery
+    // Slack delivery
     let slackPromise: Promise<void> | null = null;
     if (slackChannel && report.organization?.id) {
       slackPromise = (async () => {
@@ -173,21 +165,20 @@ export async function POST(
         });
 
         try {
-          // Extract discoveries for Slack
           const actionItems = (content.actionItems || []) as { priority: string; title: string }[];
           const discoveries: { headline: string; color: string }[] = [];
 
           if (content.blockers?.blockers?.length) {
             discoveries.push({ headline: `${content.blockers.blockers.length} blocker signals detected`, color: "red" });
           }
-          const jira = integrationData.jira as Record<string, any> | undefined;
           if (jira?.issues?.overdue?.length) {
             discoveries.push({ headline: `${jira.issues.overdue.length} overdue tickets`, color: "red" });
           }
-          const gh = integrationData.github as Record<string, any> | undefined;
           if (gh?.pullRequests?.stalePrs?.length) {
             discoveries.push({ headline: `${gh.pullRequests.stalePrs.length} stale PRs`, color: "amber" });
           }
+
+          const reportViewUrl = `${baseUrl}/api/reports/${report.id}/view?token=${delivery.id}`;
 
           const slackResult = await deliverReportToSlack({
             orgId: report.organization!.id,
@@ -197,6 +188,7 @@ export async function POST(
             discoveries,
             actionItems,
             reportTitle: report.title,
+            reportUrl: reportViewUrl,
           });
 
           if (slackResult.ok) {
@@ -226,26 +218,16 @@ export async function POST(
       })();
     }
 
-    // Wait for all deliveries
     await Promise.allSettled([...emailPromises, ...(slackPromise ? [slackPromise] : [])]);
 
     const sentCount = results.filter((r) => r.status === "sent").length;
     const failedCount = results.filter((r) => r.status === "failed").length;
 
-    // Update report status if at least one delivery succeeded, and purge raw data
+    // Update report status — but do NOT purge content (needed for the view link)
     if (sentCount > 0) {
-      const purgedContent = {
-        connectedSources: content.connectedSources,
-        periodStart: content.periodStart,
-        periodEnd: content.periodEnd,
-      };
-
       await prisma.report.update({
         where: { id: report.id },
-        data: {
-          status: "DELIVERED",
-          content: purgedContent as object,
-        },
+        data: { status: "DELIVERED" },
       });
     }
 

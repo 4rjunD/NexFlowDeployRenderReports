@@ -2,8 +2,7 @@
 // Usage: npx tsx scripts/deliver-report.ts <reportId> <email>
 
 import prisma from "../src/lib/db/prisma";
-import { buildReportHtml, computeKPIs } from "../src/lib/pdf/report-html";
-import { htmlToPdf } from "../src/lib/pdf/generate";
+import { computeKPIs } from "../src/lib/pdf/report-html";
 import { sendReportEmail } from "../src/lib/email/send";
 import { computeHealthScore } from "../src/lib/scoring/health-score";
 
@@ -44,24 +43,6 @@ async function main() {
   const healthScore = computeHealthScore(integrationData, isFirstReport);
   console.log(`Health Score: ${healthScore.overall} (${healthScore.grade})`);
 
-  // Build HTML and PDF
-  console.log("Building HTML...");
-  const reportHtml = buildReportHtml({
-    title: report.title,
-    orgName,
-    periodStart: report.periodStart,
-    periodEnd: report.periodEnd,
-    generatedAt: report.generatedAt,
-    aiNarrative: report.aiNarrative,
-    content,
-    showDownloadBar: false,
-    healthScore,
-  });
-
-  console.log("Generating PDF via Puppeteer...");
-  const pdfBuffer = await htmlToPdf(reportHtml);
-  console.log(`PDF generated: ${(pdfBuffer.length / 1024).toFixed(1)} KB`);
-
   // Extract KPIs
   const kpis = computeKPIs(integrationData);
 
@@ -75,7 +56,11 @@ async function main() {
     },
   });
 
-  // Send email
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
+  const reportViewUrl = `${baseUrl}/api/reports/${report.id}/view?token=${delivery.id}`;
+  const pdfDownloadUrl = `${reportViewUrl}&format=pdf`;
+
+  // Send email with link
   console.log(`Sending email to ${email}...`);
   try {
     await sendReportEmail({
@@ -84,7 +69,8 @@ async function main() {
       reportTitle: report.title,
       orgName,
       kpis,
-      pdfBuffer,
+      reportViewUrl,
+      pdfDownloadUrl,
       healthScore,
     });
 
@@ -100,6 +86,7 @@ async function main() {
     ]);
 
     console.log(`Report delivered to ${email}`);
+    console.log(`View link: ${reportViewUrl}`);
   } catch (error) {
     await prisma.reportDelivery.update({
       where: { id: delivery.id },

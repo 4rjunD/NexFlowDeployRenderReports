@@ -29,8 +29,10 @@ interface SendReportEmailOptions {
   reportTitle: string;
   orgName: string;
   kpis: KpiItem[];
-  pdfBuffer: Buffer;
+  reportViewUrl: string;
+  pdfDownloadUrl: string;
   healthScore?: HealthScoreEmail | null;
+  topDiscoveries?: string[];
 }
 
 export async function sendReportEmail({
@@ -39,8 +41,10 @@ export async function sendReportEmail({
   reportTitle,
   orgName,
   kpis,
-  pdfBuffer,
+  reportViewUrl,
+  pdfDownloadUrl,
   healthScore = null,
+  topDiscoveries = [],
 }: SendReportEmailOptions) {
   // Health score for email — monochrome
   const healthHtml = healthScore
@@ -85,6 +89,14 @@ export async function sendReportEmail({
       </table>`
     : "";
 
+  // Top discoveries preview
+  const discoveriesHtml = topDiscoveries.length > 0
+    ? `<div style="margin: 16px 0; padding: 12px 16px; background: #fafafa; border-left: 2px solid #1a1a1a;">
+        <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 8px;">Key Findings</div>
+        ${topDiscoveries.map((d) => `<div style="font-size: 12px; color: #333; margin-bottom: 4px; line-height: 1.5;">&#8226; ${d}</div>`).join("")}
+      </div>`
+    : "";
+
   const html = `
 <!DOCTYPE html>
 <html>
@@ -109,20 +121,21 @@ export async function sendReportEmail({
 
               ${healthHtml}
               ${kpiHtml}
+              ${discoveriesHtml}
 
-              <p style="margin: 0 0 10px; font-size: 12px; line-height: 1.6; color: #333;">
-                The attached PDF contains the full engineering analysis for this reporting period, including health index scoring, delivery metrics, code review analysis, risk signals, and prioritized recommendations.
+              <p style="margin: 0 0 16px; font-size: 12px; line-height: 1.6; color: #333;">
+                Your full engineering report is ready. It includes health index scoring, delivery metrics, code review analysis, risk signals, and prioritized recommendations.
               </p>
 
-              <p style="margin: 0 0 10px; font-size: 12px; line-height: 1.6; color: #333;">
-                Each report tracks your team's progression against prior periods. Recommended actions carry forward — subsequent reports will assess whether prior recommendations were addressed and measure the impact.
-              </p>
-
-              <div style="border-left: 2px solid #1a1a1a; padding: 8px 12px; margin: 12px 0; background: #fafafa;">
-                <p style="margin: 0; font-size: 11px; color: #333;">The full report is attached as a PDF.</p>
+              <div style="text-align: center; margin: 24px 0;">
+                <a href="${reportViewUrl}" style="display: inline-block; background-color: #1a1a1a; color: #ffffff; padding: 14px 32px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600;">View Full Report</a>
               </div>
 
-              <p style="margin: 10px 0 0; font-size: 12px; line-height: 1.6; color: #333;">
+              <p style="margin: 0; font-size: 11px; color: #aaa; text-align: center;">
+                <a href="${pdfDownloadUrl}" style="color: #888; text-decoration: underline;">Download as PDF</a>
+              </p>
+
+              <p style="margin: 16px 0 0; font-size: 12px; line-height: 1.6; color: #333;">
                 Reply to this email with questions or feedback.
               </p>
             </td>
@@ -141,20 +154,11 @@ export async function sendReportEmail({
 </body>
 </html>`;
 
-  const sanitizedTitle = reportTitle.replace(/[^a-zA-Z0-9\s\-–—]/g, "").replace(/\s+/g, "-").slice(0, 80);
-
   const result = await transporter.sendMail({
     from: process.env.EMAIL_FROM || process.env.SMTP_USER,
     to,
     subject,
     html,
-    attachments: [
-      {
-        filename: `${sanitizedTitle}.pdf`,
-        content: pdfBuffer,
-        contentType: "application/pdf",
-      },
-    ],
   });
 
   return result;

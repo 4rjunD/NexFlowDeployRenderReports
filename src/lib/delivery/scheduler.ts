@@ -6,16 +6,15 @@
 import prisma from "@/lib/db/prisma";
 import { sendReportEmail } from "@/lib/email/send";
 import { deliverReportToSlack } from "@/lib/delivery/slack";
-import { buildReportHtml, computeKPIs } from "@/lib/pdf/report-html";
-import { htmlToPdf } from "@/lib/pdf/generate";
+import { computeKPIs } from "@/lib/pdf/report-html";
 import { computeHealthScore } from "@/lib/scoring/health-score";
 
 export interface DeliveryConfig {
   autoApprove: boolean;
   autoDeliver: boolean;
-  deliveryDay: string; // "monday" | "tuesday" | etc.
-  deliveryTime: string; // "09:00"
-  timezone: string; // "America/New_York"
+  deliveryDay: string;
+  deliveryTime: string;
+  timezone: string;
   channels: ("EMAIL" | "SLACK")[];
   recipients: {
     email?: string;
@@ -47,9 +46,8 @@ export function isDeliveryTime(config: DeliveryConfig): boolean {
   const targetDay = dayMap[config.deliveryDay.toLowerCase()];
   if (targetDay == null || now.getUTCDay() !== targetDay) return false;
 
-  const [targetHour, targetMin] = config.deliveryTime.split(":").map(Number);
+  const [targetHour] = config.deliveryTime.split(":").map(Number);
   const currentHour = now.getUTCHours();
-  // Allow a 1-hour window for cron timing
   return Math.abs(currentHour - targetHour) <= 1;
 }
 
@@ -91,47 +89,33 @@ export async function autoDeliverReport(
   const orgName = report.organization?.name || "Your Organization";
   const integrationData = (content.integrationData as Record<string, unknown>) || {};
 
-  // Check if first report
   const priorDeliveries = await prisma.reportDelivery.count({
     where: { report: { orgId: report.organization?.id }, status: "SENT" },
   });
   const isFirstReport = priorDeliveries === 0;
   const healthScore = computeHealthScore(integrationData, isFirstReport);
-
-  // Generate PDF for email delivery
-  let pdfBuffer: Buffer | null = null;
-  if (config.channels.includes("EMAIL")) {
-    const reportHtml = buildReportHtml({
-      title: report.title,
-      orgName,
-      periodStart: report.periodStart,
-      periodEnd: report.periodEnd,
-      generatedAt: report.generatedAt,
-      aiNarrative: report.aiNarrative,
-      content: content as Record<string, unknown>,
-      showDownloadBar: false,
-      healthScore,
-    });
-    try {
-      pdfBuffer = await htmlToPdf(reportHtml);
-    } catch (err) {
-      result.errors.push(`PDF generation failed: ${err instanceof Error ? err.message : "Unknown"}`);
-    }
-  }
-
   const kpis = computeKPIs(integrationData);
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
 
-  // Deliver to each recipient
+  // Extract top discoveries
+  const topDiscoveries: string[] = [];
+  const blockers = content.blockers as { blockers: unknown[] } | undefined;
+  if (blockers?.blockers?.length) topDiscoveries.push(`${blockers.blockers.length} blocker signals detected`);
+  const jira = (integrationData.jira as Record<string, any> | undefined);
+  if (jira?.issues?.overdue?.length) topDiscoveries.push(`${jira.issues.overdue.length} overdue tickets`);
+
   const deliveryPromises: Promise<void>[] = [];
 
   for (const recipient of config.recipients) {
-    // Email delivery
-    if (recipient.email && config.channels.includes("EMAIL") && pdfBuffer) {
+    // Email delivery — link-based
+    if (recipient.email && config.channels.includes("EMAIL")) {
       deliveryPromises.push(
         (async () => {
           const delivery = await prisma.reportDelivery.create({
             data: { reportId, channel: "EMAIL", recipientEmail: recipient.email, status: "PENDING" },
           });
+          const reportViewUrl = `${baseUrl}/api/reports/${reportId}/view?token=${delivery.id}`;
+          const pdfDownloadUrl = `${reportViewUrl}&format=pdf`;
           try {
             await sendReportEmail({
               to: recipient.email!,
@@ -139,8 +123,10 @@ export async function autoDeliverReport(
               reportTitle: report.title,
               orgName,
               kpis,
-              pdfBuffer: pdfBuffer!,
+              reportViewUrl,
+              pdfDownloadUrl,
               healthScore,
+              topDiscoveries: topDiscoveries.slice(0, 3),
             });
             await prisma.reportDelivery.update({
               where: { id: delivery.id },
@@ -166,9 +152,9 @@ export async function autoDeliverReport(
             data: { reportId, channel: "SLACK", recipientEmail: recipient.slackChannel, status: "PENDING" },
           });
           try {
-            // Extract top discoveries for Slack summary
             const discoveries = extractTopDiscoveries(content as Record<string, unknown>);
             const actionItems = ((content as Record<string, unknown>).actionItems as { priority: string; title: string }[]) || [];
+            const reportViewUrl = `${baseUrl}/api/reports/${reportId}/view?token=${delivery.id}`;
 
             const slackResult = await deliverReportToSlack({
               orgId: report.organization!.id,
@@ -178,6 +164,7 @@ export async function autoDeliverReport(
               discoveries,
               actionItems,
               reportTitle: report.title,
+              reportUrl: reportViewUrl,
             });
 
             if (slackResult.ok) {
@@ -203,7 +190,6 @@ export async function autoDeliverReport(
 
   await Promise.allSettled(deliveryPromises);
 
-  // Update report status if any deliveries succeeded
   if (result.emailsSent > 0 || result.slacksSent > 0) {
     await prisma.report.update({
       where: { id: reportId },
@@ -214,29 +200,15 @@ export async function autoDeliverReport(
   return result;
 }
 
-// Extract top discoveries for Slack summary (simplified)
 function extractTopDiscoveries(content: Record<string, unknown>): { headline: string; color: string }[] {
   const discoveries: { headline: string; color: string }[] = [];
-
-  // Blockers
   const blockers = content.blockers as { blockers: unknown[] } | undefined;
-  if (blockers?.blockers?.length) {
-    discoveries.push({ headline: `${blockers.blockers.length} blocker signals detected in Slack`, color: "red" });
-  }
-
-  // Overdue tickets
+  if (blockers?.blockers?.length) discoveries.push({ headline: `${blockers.blockers.length} blocker signals detected in Slack`, color: "red" });
   const jira = (content.integrationData as Record<string, unknown> | undefined)?.jira as Record<string, unknown> | undefined;
   const issues = jira?.issues as { overdue?: unknown[] } | undefined;
-  if (issues?.overdue?.length) {
-    discoveries.push({ headline: `${issues.overdue.length} overdue tickets need attention`, color: "red" });
-  }
-
-  // Stale PRs
+  if (issues?.overdue?.length) discoveries.push({ headline: `${issues.overdue.length} overdue tickets need attention`, color: "red" });
   const github = (content.integrationData as Record<string, unknown> | undefined)?.github as Record<string, unknown> | undefined;
   const prs = github?.pullRequests as { stalePrs?: unknown[] } | undefined;
-  if (prs?.stalePrs?.length) {
-    discoveries.push({ headline: `${prs.stalePrs.length} PRs stale for 7+ days`, color: "amber" });
-  }
-
+  if (prs?.stalePrs?.length) discoveries.push({ headline: `${prs.stalePrs.length} PRs stale for 7+ days`, color: "amber" });
   return discoveries.slice(0, 3);
 }
