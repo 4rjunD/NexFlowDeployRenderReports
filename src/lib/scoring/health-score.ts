@@ -201,27 +201,91 @@ function gradeFromScore(score: number): { grade: string; color: string } {
   return { grade: "F", color: "#dc2626" };
 }
 
+// Compute adaptive weights based on which sources are actually connected
+function computeAdaptiveWeights(
+  gh: D | null, issueSource: D | null, cal: D | null, sl: D | null
+): { delivery: number; quality: number; execution: number; capacity: number; communication: number } {
+  const hasGh = !!gh;
+  const hasIssues = !!issueSource;
+  const hasCal = !!cal;
+  const hasSl = !!sl;
+
+  const connected = [hasGh, hasIssues, hasCal, hasSl].filter(Boolean).length;
+
+  // Default balanced weights
+  if (connected >= 3) {
+    return { delivery: 0.25, quality: 0.20, execution: 0.20, capacity: 0.20, communication: 0.15 };
+  }
+
+  // Adaptive: redistribute missing dimension weights to connected ones
+  if (hasGh && !hasIssues && !hasCal && !hasSl) {
+    // GitHub only — delivery + quality + communication from GH
+    return { delivery: 0.40, quality: 0.40, execution: 0, capacity: 0, communication: 0.20 };
+  }
+  if (!hasGh && hasIssues && !hasCal && !hasSl) {
+    // Jira/Linear only — execution-heavy
+    return { delivery: 0, quality: 0, execution: 0.70, capacity: 0, communication: 0.30 };
+  }
+  if (!hasGh && !hasIssues && hasCal && !hasSl) {
+    // Calendar only
+    return { delivery: 0, quality: 0, execution: 0, capacity: 1.0, communication: 0 };
+  }
+  if (!hasGh && !hasIssues && !hasCal && hasSl) {
+    // Slack only
+    return { delivery: 0, quality: 0, execution: 0, capacity: 0, communication: 1.0 };
+  }
+
+  // Two sources
+  if (hasGh && hasIssues) {
+    return { delivery: 0.30, quality: 0.25, execution: 0.30, capacity: 0, communication: 0.15 };
+  }
+  if (hasGh && hasCal) {
+    return { delivery: 0.35, quality: 0.35, execution: 0, capacity: 0.30, communication: 0 };
+  }
+  if (hasGh && hasSl) {
+    return { delivery: 0.35, quality: 0.30, execution: 0, capacity: 0, communication: 0.35 };
+  }
+  if (hasIssues && hasSl) {
+    return { delivery: 0, quality: 0, execution: 0.50, capacity: 0, communication: 0.50 };
+  }
+  if (hasIssues && hasCal) {
+    return { delivery: 0, quality: 0, execution: 0.55, capacity: 0.45, communication: 0 };
+  }
+  if (hasCal && hasSl) {
+    return { delivery: 0, quality: 0, execution: 0, capacity: 0.55, communication: 0.45 };
+  }
+
+  // Fallback: equal weights for whatever is connected
+  return { delivery: 0.25, quality: 0.20, execution: 0.20, capacity: 0.20, communication: 0.15 };
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function computeHealthScore(integrationData: Record<string, any>, isFirstReport: boolean): HealthScore {
   const gh = integrationData.github || null;
+  const jr = integrationData.jira || null;
   const ln = integrationData.linear || null;
   const cal = integrationData.googleCalendar || null;
   const sl = integrationData.slack || null;
 
+  // Use Jira if available, fall back to Linear
+  const issueSource = jr || ln;
+
+  const weights = computeAdaptiveWeights(gh, issueSource, cal, sl);
+
   const dimensions = [
-    scoreDeliveryVelocity(gh),
-    scoreCodeQuality(gh),
-    scoreSprintExecution(ln),
-    scoreTeamCapacity(cal),
-    scoreCommunication(sl),
-  ];
+    { ...scoreDeliveryVelocity(gh), weight: weights.delivery },
+    { ...scoreCodeQuality(gh), weight: weights.quality },
+    { ...scoreSprintExecution(issueSource), weight: weights.execution },
+    { ...scoreTeamCapacity(cal), weight: weights.capacity },
+    { ...scoreCommunication(sl), weight: weights.communication },
+  ].filter(d => d.weight > 0); // Only include dimensions with weight
 
   // Weighted average
   let rawScore = dimensions.reduce((sum, d) => sum + d.score * d.weight, 0);
 
   // First report nudge: lower by 8-12 points to create urgency
   if (isFirstReport) {
-    const nudge = 8 + Math.random() * 4; // 8-12 point reduction
+    const nudge = 8 + Math.random() * 4;
     rawScore = Math.max(35, rawScore - nudge);
   }
 

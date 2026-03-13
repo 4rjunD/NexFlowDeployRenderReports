@@ -24,15 +24,20 @@ export interface JiraIssue {
   key: string;
   fields: {
     summary: string;
+    description?: unknown;
     status: { name: string; statusCategory: { key: string; name: string } };
     priority?: { name: string };
-    issuetype: { name: string };
+    issuetype: { name: string; hierarchyLevel?: number };
     assignee?: { displayName: string; accountId: string } | null;
     reporter?: { displayName: string; accountId: string } | null;
+    parent?: { id: string; key: string; fields?: { summary: string; status?: { name: string; statusCategory: { key: string } }; issuetype?: { name: string } } } | null;
     created: string;
     updated: string;
     resolutiondate?: string | null;
+    duedate?: string | null;
     labels?: string[];
+    components?: { name: string }[];
+    fixVersions?: { name: string; released: boolean; releaseDate?: string }[];
     story_points?: number;
     // custom fields may vary
     [key: string]: unknown;
@@ -112,15 +117,30 @@ export async function searchIssues(token: string, cloudId: string, jql: string, 
   const params = new URLSearchParams({
     jql,
     maxResults: String(maxResults),
-    fields: "summary,status,priority,issuetype,assignee,reporter,created,updated,resolutiondate,labels",
+    fields: "summary,description,status,priority,issuetype,assignee,reporter,parent,created,updated,resolutiondate,duedate,labels,components,fixVersions",
   });
   const data = await jiraFetch<{ issues: JiraIssue[] }>(token, cloudId, `/search?${params.toString()}`);
   return data.issues || [];
 }
 
+// Fetch epics specifically (for deliverable tracking)
+export async function fetchEpics(token: string, cloudId: string, since?: string): Promise<JiraIssue[]> {
+  let jql = `issuetype = Epic ORDER BY updated DESC`;
+  if (since) {
+    const sinceDate = since.split("T")[0];
+    jql = `issuetype = Epic AND updated >= "${sinceDate}" ORDER BY updated DESC`;
+  }
+  return searchIssues(token, cloudId, jql, 100);
+}
+
+// Fetch child issues for an epic
+export async function fetchEpicChildren(token: string, cloudId: string, epicKey: string): Promise<JiraIssue[]> {
+  return searchIssues(token, cloudId, `parent = ${epicKey} ORDER BY status ASC, priority ASC`, 200);
+}
+
 export async function fetchSprintIssues(token: string, cloudId: string, sprintId: number): Promise<JiraIssue[]> {
   try {
-    const data = await jiraAgile<{ issues: JiraIssue[] }>(token, cloudId, `/sprint/${sprintId}/issue?maxResults=100&fields=summary,status,priority,issuetype,assignee,reporter,created,updated,resolutiondate,labels`);
+    const data = await jiraAgile<{ issues: JiraIssue[] }>(token, cloudId, `/sprint/${sprintId}/issue?maxResults=100&fields=summary,description,status,priority,issuetype,assignee,reporter,parent,created,updated,resolutiondate,duedate,labels,components,fixVersions`);
     return data.issues || [];
   } catch {
     return [];

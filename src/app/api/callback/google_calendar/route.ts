@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeGoogleCode } from "@/lib/integrations/google/oauth";
+import { encryptToken } from "@/lib/crypto";
 import prisma from "@/lib/db/prisma";
 
 export async function GET(request: NextRequest) {
@@ -14,13 +15,17 @@ export async function GET(request: NextRequest) {
 
   try {
     const tokenData = await exchangeGoogleCode(code);
+    const encryptedAccess = encryptToken(tokenData.access_token);
+    const encryptedRefresh = tokenData.refresh_token
+      ? encryptToken(tokenData.refresh_token)
+      : null;
     const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
 
     await prisma.integration.upsert({
       where: { orgId_type: { orgId: state, type: "GOOGLE_CALENDAR" } },
       update: {
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token || undefined,
+        accessToken: encryptedAccess,
+        refreshToken: encryptedRefresh || undefined,
         expiresAt,
         status: "CONNECTED",
         config: { scope: tokenData.scope },
@@ -29,8 +34,8 @@ export async function GET(request: NextRequest) {
         orgId: state,
         type: "GOOGLE_CALENDAR",
         status: "CONNECTED",
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token || null,
+        accessToken: encryptedAccess,
+        refreshToken: encryptedRefresh,
         expiresAt,
         config: { scope: tokenData.scope },
       },

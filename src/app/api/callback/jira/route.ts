@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeJiraCode } from "@/lib/integrations/jira/oauth";
+import { encryptToken } from "@/lib/crypto";
 import prisma from "@/lib/db/prisma";
 
 export async function GET(request: NextRequest) {
@@ -14,12 +15,16 @@ export async function GET(request: NextRequest) {
 
   try {
     const tokenData = await exchangeJiraCode(code);
+    const encryptedAccess = encryptToken(tokenData.access_token);
+    const encryptedRefresh = tokenData.refresh_token
+      ? encryptToken(tokenData.refresh_token)
+      : null;
 
     await prisma.integration.upsert({
       where: { orgId_type: { orgId: state, type: "JIRA" } },
       update: {
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token || null,
+        accessToken: encryptedAccess,
+        refreshToken: encryptedRefresh,
         status: "CONNECTED",
         config: { scope: tokenData.scope },
       },
@@ -27,8 +32,8 @@ export async function GET(request: NextRequest) {
         orgId: state,
         type: "JIRA",
         status: "CONNECTED",
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token || null,
+        accessToken: encryptedAccess,
+        refreshToken: encryptedRefresh,
         config: { scope: tokenData.scope },
       },
     });

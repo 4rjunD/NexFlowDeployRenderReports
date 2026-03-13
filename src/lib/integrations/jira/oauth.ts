@@ -6,17 +6,13 @@ const JIRA_AUTH_URL = "https://auth.atlassian.com/authorize";
 const JIRA_TOKEN_URL = "https://auth.atlassian.com/oauth/token";
 
 const SCOPES = [
-  "read:jira-work",
-  "read:jira-user",
-  "manage:jira-project",
-  "manage:jira-configuration",
-  "write:jira-work",
-  "manage:jira-webhook",
-  "read:servicedesk-request",
-  "read:servicemanagement-insight-objects",
-  "read:me",
-  "read:account",
-  "offline_access",
+  "read:jira-work",                        // Read issues, sprints, boards
+  "read:jira-user",                        // Read user profiles
+  "read:servicedesk-request",              // Read service desk tickets
+  "read:servicemanagement-insight-objects", // Read insight objects
+  "read:me",                               // Read authenticated user
+  "read:account",                          // Read account info
+  "offline_access",                        // Refresh token support
 ];
 
 const CALLBACK_URL = `${process.env.NEXT_PUBLIC_APP_URL}/api/callback/jira`;

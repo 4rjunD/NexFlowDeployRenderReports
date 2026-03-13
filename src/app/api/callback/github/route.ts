@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeGithubCode } from "@/lib/integrations/github/oauth";
+import { encryptToken } from "@/lib/crypto";
 import prisma from "@/lib/db/prisma";
 
 export async function GET(request: NextRequest) {
@@ -14,11 +15,12 @@ export async function GET(request: NextRequest) {
 
   try {
     const tokenData = await exchangeGithubCode(code);
+    const encryptedToken = encryptToken(tokenData.access_token);
 
     await prisma.integration.upsert({
       where: { orgId_type: { orgId: state, type: "GITHUB" } },
       update: {
-        accessToken: tokenData.access_token,
+        accessToken: encryptedToken,
         status: "CONNECTED",
         config: { scope: tokenData.scope },
       },
@@ -26,7 +28,7 @@ export async function GET(request: NextRequest) {
         orgId: state,
         type: "GITHUB",
         status: "CONNECTED",
-        accessToken: tokenData.access_token,
+        accessToken: encryptedToken,
         config: { scope: tokenData.scope },
       },
     });

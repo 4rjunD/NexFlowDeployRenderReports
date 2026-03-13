@@ -3,8 +3,8 @@ services:
     name: nexflow-platform
     runtime: node
     plan: starter
-    buildCommand: pnpm install && npx prisma generate && pnpm build
-    startCommand: npx prisma db push --skip-generate && pnpm start
+    buildCommand: npm install --legacy-peer-deps && npx prisma generate && npm run build
+    startCommand: npx prisma db push --skip-generate && npm start
     envVars:
       - key: NODE_ENV
         value: production
@@ -15,8 +15,12 @@ services:
       - key: NEXTAUTH_URL
         sync: false
       - key: NEXTAUTH_SECRET
-        generateValue: true
+        sync: false
       - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: CRON_SECRET
         sync: false
       - key: EMAIL_FROM
         sync: false

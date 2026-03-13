@@ -460,19 +460,49 @@ export default function SetupPage() {
               <h2 className="text-lg font-semibold">2. Add Context for Your Reports</h2>
             </div>
             <p className="text-sm text-muted-foreground">
-              Share any context you want the AI analyst to consider — current initiatives, team goals, known challenges, or specific questions you want answered. This shapes every report we generate.
+              Share context that shapes your report — current deliverables, project timelines, team structure, or any tracking data (you can paste from Notion, spreadsheets, or docs). The more context you provide, the more tailored your report will be.
             </p>
-            <textarea
-              id="customContext"
-              rows={4}
-              value={prefs.customContext}
-              onChange={(e) => {
-                setPrefs((prev) => ({ ...prev, customContext: e.target.value }))
-                setPrefsSaved(false)
-              }}
-              placeholder="e.g., We're migrating to microservices this quarter. Focus on delivery risk in the payments-service repo. Our team expanded from 5 to 8 engineers last month — watch for onboarding bottlenecks."
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-            />
+            <div className="space-y-2">
+              <textarea
+                id="customContext"
+                rows={8}
+                value={prefs.customContext}
+                onChange={(e) => {
+                  setPrefs((prev) => ({ ...prev, customContext: e.target.value }))
+                  setPrefsSaved(false)
+                }}
+                placeholder={`Example context you can paste here:
+
+• Active deliverables and their status (paste from Notion, Asana, etc.)
+• "Client A — API integration due March 15, currently blocked on auth"
+• "Sprint goal: complete checkout flow redesign by end of sprint"
+• Team structure: who owns what
+• Known risks or challenges
+• Questions you want the report to answer`}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-y min-h-[120px]"
+              />
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  {prefs.customContext.length > 0 ? `${prefs.customContext.length.toLocaleString()} characters` : "Paste deliverable trackers, project plans, or any context here"}
+                </p>
+                {prefs.customContext.length > 0 && !prefsSaved && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleSavePreferences}
+                    disabled={savingPrefs}
+                    className="text-xs h-7"
+                  >
+                    {savingPrefs ? "Saving..." : "Save Context"}
+                  </Button>
+                )}
+                {prefsSaved && prefs.customContext.length > 0 && (
+                  <span className="text-xs text-green-600 flex items-center gap-1">
+                    <Check className="h-3 w-3" /> Saved
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
           <Separator />

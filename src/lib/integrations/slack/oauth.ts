@@ -5,6 +5,7 @@
 const SLACK_SCOPES = [
   "channels:read",         // List all channels
   "channels:history",      // Read messages in public channels
+  "channels:join",         // Join public channels to read history
   "groups:read",           // List private channels
   "groups:history",        // Read messages in private channels
   "im:read",              // List DMs

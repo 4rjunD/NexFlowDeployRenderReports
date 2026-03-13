@@ -227,3 +227,66 @@ export async function fetchReviews(
 ): Promise<GitHubReview[]> {
   return githubFetch<GitHubReview[]>(token, `/repos/${owner}/${repo}/pulls/${prNumber}/reviews`);
 }
+
+// GitHub Issues (not PRs) — for deliverable/milestone tracking
+export interface GitHubIssue {
+  id: number;
+  number: number;
+  title: string;
+  state: string;
+  state_reason?: string | null;
+  user: { login: string; id: number };
+  assignee?: { login: string; id: number } | null;
+  assignees?: { login: string; id: number }[];
+  labels: { name: string; color: string }[];
+  milestone?: { title: string; state: string; due_on: string | null; open_issues: number; closed_issues: number } | null;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  body: string | null;
+  html_url: string;
+  pull_request?: unknown; // present if this is a PR
+}
+
+export interface GitHubMilestone {
+  id: number;
+  title: string;
+  state: string;
+  description: string | null;
+  due_on: string | null;
+  open_issues: number;
+  closed_issues: number;
+  created_at: string;
+  updated_at: string;
+  html_url: string;
+}
+
+export async function fetchIssues(
+  token: string,
+  owner: string,
+  repo: string,
+  since?: string
+): Promise<GitHubIssue[]> {
+  const params: Record<string, string> = {
+    state: "all",
+    sort: "updated",
+    direction: "desc",
+  };
+  if (since) params.since = since;
+
+  const all = await githubFetchPaginated<GitHubIssue>(token, `/repos/${owner}/${repo}/issues`, params);
+  // Filter out PRs (GitHub returns PRs in issues endpoint)
+  return all.filter(i => !i.pull_request);
+}
+
+export async function fetchMilestones(
+  token: string,
+  owner: string,
+  repo: string
+): Promise<GitHubMilestone[]> {
+  return githubFetchPaginated<GitHubMilestone>(token, `/repos/${owner}/${repo}/milestones`, {
+    state: "all",
+    sort: "due_on",
+    direction: "desc",
+  });
+}

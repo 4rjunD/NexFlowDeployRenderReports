@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeLinearCode } from "@/lib/integrations/linear/oauth";
+import { encryptToken } from "@/lib/crypto";
 import prisma from "@/lib/db/prisma";
 
 export async function GET(request: NextRequest) {
@@ -14,6 +15,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const tokenData = await exchangeLinearCode(code);
+    const encryptedToken = encryptToken(tokenData.access_token);
     const expiresAt = tokenData.expires_in
       ? new Date(Date.now() + tokenData.expires_in * 1000)
       : null;
@@ -21,7 +23,7 @@ export async function GET(request: NextRequest) {
     await prisma.integration.upsert({
       where: { orgId_type: { orgId: state, type: "LINEAR" } },
       update: {
-        accessToken: tokenData.access_token,
+        accessToken: encryptedToken,
         status: "CONNECTED",
         expiresAt,
         config: { scope: tokenData.scope },
@@ -30,7 +32,7 @@ export async function GET(request: NextRequest) {
         orgId: state,
         type: "LINEAR",
         status: "CONNECTED",
-        accessToken: tokenData.access_token,
+        accessToken: encryptedToken,
         expiresAt,
         config: { scope: tokenData.scope },
       },

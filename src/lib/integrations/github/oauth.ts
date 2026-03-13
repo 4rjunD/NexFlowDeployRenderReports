@@ -2,8 +2,8 @@ const GITHUB_AUTH_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 
 const SCOPES = [
-  "repo",           // Full access to all repos (public + private)
-  "admin:org",      // Full org access — read members, teams, repos
+  "repo",           // Read repo data (PRs, commits, issues) — GitHub requires this for private repos; NexFlow uses read-only API calls
+  "read:org",       // Read org members and teams (read-only)
   "read:user",      // Read user profile
   "user:email",     // Read user email
   "read:project",   // Read org projects

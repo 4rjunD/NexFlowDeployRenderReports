@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import prisma from "@/lib/db/prisma"
 import { exchangeSlackCode } from "@/lib/integrations/slack/oauth"
+import { encryptToken } from "@/lib/crypto"
 
 /**
  * GET /api/callback/slack
@@ -53,6 +54,7 @@ export async function GET(request: NextRequest) {
 
     // Exchange code for token
     const tokenData = await exchangeSlackCode(code)
+    const encryptedToken = encryptToken(tokenData.access_token)
 
     // Upsert the integration record
     await prisma.integration.upsert({
@@ -63,7 +65,7 @@ export async function GET(request: NextRequest) {
         },
       },
       update: {
-        accessToken: tokenData.access_token,
+        accessToken: encryptedToken,
         status: "CONNECTED",
         config: {
           teamId: tokenData.team.id,
@@ -77,7 +79,7 @@ export async function GET(request: NextRequest) {
         orgId,
         type: "SLACK",
         status: "CONNECTED",
-        accessToken: tokenData.access_token,
+        accessToken: encryptedToken,
         config: {
           teamId: tokenData.team.id,
           teamName: tokenData.team.name,

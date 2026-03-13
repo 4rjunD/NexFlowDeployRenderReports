@@ -20,6 +20,10 @@ export interface GoogleCalendarMetrics {
     allDayEvents: number;
     recurring: number;
   };
+  meetingCostEstimate: number;
+  recurringMeetingPct: number;
+  peakMeetingDay: string;
+  externalMeetingPct: number;
   period: { since: string; until: string };
 }
 
@@ -146,10 +150,69 @@ export async function collectGoogleCalendarMetrics(
 
   const recurring = timedEvents.filter((e) => e.recurringEventId).length;
 
+  // Meeting cost estimate at $150/hr default rate
+  const roundedTotalHours = Math.round(totalHours * 10) / 10;
+  const meetingCostEstimate = Math.round(roundedTotalHours * 150);
+
+  // Recurring meeting percentage
+  const recurringMeetingPct = timedEvents.length > 0
+    ? Math.round((recurring / timedEvents.length) * 100)
+    : 0;
+
+  // Peak meeting day — day of week with most meeting hours
+  // byDay currently stores meeting counts; compute hours by day for peak detection
+  const hoursByDay: Record<string, number> = {};
+  for (const event of timedEvents) {
+    const duration = getEventDurationHours(event);
+    const date = new Date(event.start.dateTime!);
+    const day = getDayKey(date);
+    hoursByDay[day] = (hoursByDay[day] || 0) + duration;
+  }
+  let peakMeetingDay = "";
+  let peakHours = 0;
+  for (const [day, hours] of Object.entries(hoursByDay)) {
+    if (hours > peakHours) {
+      peakHours = hours;
+      peakMeetingDay = day;
+    }
+  }
+
+  // External meeting percentage — meetings with attendees from different domains
+  // Determine owner domain from organizer or self-attendee
+  let ownerDomain = "";
+  for (const event of timedEvents) {
+    if (event.organizer?.self && event.organizer.email) {
+      ownerDomain = event.organizer.email.split("@")[1] || "";
+      break;
+    }
+    if (event.attendees) {
+      const selfAttendee = event.attendees.find((a) => a.self);
+      if (selfAttendee) {
+        ownerDomain = selfAttendee.email.split("@")[1] || "";
+        break;
+      }
+    }
+  }
+
+  let externalMeetingCount = 0;
+  if (ownerDomain) {
+    for (const event of timedEvents) {
+      if (event.attendees && event.attendees.length > 0) {
+        const hasExternal = event.attendees.some(
+          (a) => !a.self && a.email && a.email.split("@")[1] !== ownerDomain
+        );
+        if (hasExternal) externalMeetingCount++;
+      }
+    }
+  }
+  const externalMeetingPct = timedEvents.length > 0 && ownerDomain
+    ? Math.round((externalMeetingCount / timedEvents.length) * 100)
+    : 0;
+
   return {
     meetings: {
       total: timedEvents.length,
-      totalHours: Math.round(totalHours * 10) / 10,
+      totalHours: roundedTotalHours,
       avgPerWeek: Math.round((timedEvents.length / weeksInPeriod) * 10) / 10,
       hoursPerWeek,
       byDay,
@@ -165,6 +228,10 @@ export async function collectGoogleCalendarMetrics(
       allDayEvents: allDayEvents.length,
       recurring,
     },
+    meetingCostEstimate,
+    recurringMeetingPct,
+    peakMeetingDay,
+    externalMeetingPct,
     period: { since, until: now },
   };
 }
