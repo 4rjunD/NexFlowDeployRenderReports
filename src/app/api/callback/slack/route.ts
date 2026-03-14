@@ -90,7 +90,17 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/setup/connected?service=Slack`)
+    // Redirect back to onboarding setup page if applicable
+    const onboarding = await prisma.clientOnboarding.findFirst({
+      where: { orgId, status: "PENDING" },
+      orderBy: { createdAt: "desc" },
+    })
+
+    const returnTo = onboarding
+      ? `/setup/${onboarding.token}`
+      : `/setup/connected?service=Slack`
+
+    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}${returnTo}`)
   } catch (err) {
     console.error("Slack OAuth callback error:", err)
     return NextResponse.redirect(

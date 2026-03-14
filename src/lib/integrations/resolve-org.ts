@@ -1,16 +1,13 @@
-import { auth } from "@/lib/auth";
+import { NextRequest } from "next/server";
 import prisma from "@/lib/db/prisma";
+import { auth } from "@/lib/auth";
 
-/**
- * Resolve orgId from either:
- * 1. An onboarding token (for client setup flow)
- * 2. The authenticated user's session (for admin flow)
- */
+// Resolves orgId from either an onboarding token or an authenticated admin session.
+// Used by the integration connect routes.
 export async function resolveOrgId(
-  request: Request
+  request: NextRequest
 ): Promise<{ orgId: string } | { error: string; status: number }> {
-  const url = new URL(request.url);
-  const onboardingToken = url.searchParams.get("onboarding");
+  const onboardingToken = request.nextUrl.searchParams.get("onboarding");
 
   if (onboardingToken) {
     const onboarding = await prisma.clientOnboarding.findUnique({
@@ -28,12 +25,13 @@ export async function resolveOrgId(
     return { orgId: onboarding.orgId };
   }
 
+  // Fallback: authenticated admin user
   const session = await auth();
   if (!session?.user) {
     return { error: "Unauthorized", status: 401 };
   }
 
-  const orgId = (session.user as any).orgId;
+  const orgId = (session.user as any).orgId as string | undefined;
   if (!orgId) {
     return { error: "No organization found", status: 400 };
   }

@@ -1,13 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { resolveOrgId } from "@/lib/integrations/resolve-org";
 import { getGoogleAuthUrl } from "@/lib/integrations/google/oauth";
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const result = await resolveOrgId(request);
   if ("error" in result) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
-
   const authUrl = getGoogleAuthUrl(result.orgId);
   return NextResponse.redirect(authUrl);
 }

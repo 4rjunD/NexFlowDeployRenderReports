@@ -38,7 +38,17 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    return NextResponse.redirect(`${baseUrl}/setup/connected?service=Linear`);
+    // Redirect back to onboarding setup page if applicable
+    const onboarding = await prisma.clientOnboarding.findFirst({
+      where: { orgId: state, status: "PENDING" },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const returnTo = onboarding
+      ? `/setup/${onboarding.token}`
+      : `/setup/connected?service=Linear`;
+
+    return NextResponse.redirect(`${baseUrl}${returnTo}`);
   } catch (error) {
     console.error("Linear OAuth callback error:", error);
     return NextResponse.redirect(`${baseUrl}/setup/connected?error=Failed+to+connect+Linear`);
