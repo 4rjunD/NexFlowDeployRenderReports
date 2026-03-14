@@ -53,13 +53,16 @@ export default async function ReportDetailPage({ params }: ReportDetailPageProps
     reviewedAt: report.reviewedAt?.toISOString() ?? null,
     reviewedByName: report.reviewedBy?.name ?? null,
     reviewNotes: report.reviewNotes,
+    orgId: report.orgId,
     deliveries: report.deliveries.map((d) => ({
       id: d.id,
       channel: d.channel,
       status: d.status,
       sentAt: d.sentAt?.toISOString() ?? null,
-      recipientName: d.recipient?.name ?? null,
+      recipientName: d.recipientName ?? d.recipient?.name ?? null,
       recipientEmail: d.recipient?.email ?? d.recipientEmail ?? null,
+      recipientRole: d.recipientRole ?? null,
+      reportDepth: d.reportDepth ?? null,
     })),
   }
 

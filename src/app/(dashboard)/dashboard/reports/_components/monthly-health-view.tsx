@@ -353,6 +353,7 @@ export function MonthlyHealthView({ report, userRole }: MonthlyHealthViewProps) 
         userRole={userRole}
         aiNarrative={report.aiNarrative}
         summary={report.summary}
+        orgId={(report as any).orgId}
       />
 
       {/* Review Status */}

@@ -33,6 +33,9 @@ interface SendReportEmailOptions {
   pdfDownloadUrl: string;
   healthScore?: HealthScoreEmail | null;
   topDiscoveries?: string[];
+  recipientName?: string;
+  recipientRole?: string;
+  reportDepth?: string;
 }
 
 export async function sendReportEmail({
@@ -45,7 +48,15 @@ export async function sendReportEmail({
   pdfDownloadUrl,
   healthScore = null,
   topDiscoveries = [],
+  recipientName,
+  recipientRole,
+  reportDepth,
 }: SendReportEmailOptions) {
+  // Role-aware greeting and depth label
+  const greeting = recipientName ? `Hi ${recipientName.split(" ")[0]},` : "";
+  const depthLabel = reportDepth === "EXECUTIVE" ? "Executive Summary" : reportDepth === "STANDARD" ? "Team Report" : "";
+  const roleLabel = recipientRole ? recipientRole.replace(/_/g, " ") : "";
+
   // Health score for email — monochrome
   const healthHtml = healthScore
     ? `<table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 16px; border: 1px solid #ddd;">
@@ -116,8 +127,12 @@ export async function sendReportEmail({
           </tr>
           <tr>
             <td style="padding: 24px 28px;">
+              ${greeting ? `<p style="margin: 0 0 12px; font-size: 13px; color: #333;">${greeting}</p>` : ""}
               <h2 style="margin: 0 0 4px; font-size: 18px; color: #1a1a1a; font-weight: 700;">${reportTitle}</h2>
-              <p style="margin: 0 0 16px; font-size: 11px; color: #888;">Prepared for ${orgName}</p>
+              <div style="margin: 0 0 16px; display: flex; gap: 8px; align-items: center;">
+                <span style="font-size: 11px; color: #888;">Prepared for ${orgName}</span>
+                ${depthLabel ? `<span style="font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #fff; background: #1a1a1a; padding: 2px 8px; border-radius: 3px;">${depthLabel}</span>` : ""}
+              </div>
 
               ${healthHtml}
               ${kpiHtml}

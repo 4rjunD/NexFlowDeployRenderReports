@@ -295,6 +295,7 @@ export function SprintRiskView({ report, userRole }: SprintRiskViewProps) {
         userRole={userRole}
         aiNarrative={report.aiNarrative}
         summary={report.summary}
+        orgId={(report as any).orgId}
       />
 
       {/* Review Status */}

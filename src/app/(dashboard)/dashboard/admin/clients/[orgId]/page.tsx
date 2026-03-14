@@ -22,6 +22,9 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
         orderBy: { createdAt: "desc" },
         take: 1,
       },
+      reportRecipients: {
+        orderBy: [{ active: "desc" }, { role: "asc" }, { name: "asc" }],
+      },
       reports: {
         orderBy: { createdAt: "desc" },
         take: 10,
@@ -63,6 +66,16 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
           completedAt: org.clientOnboardings[0].completedAt?.toISOString() ?? null,
         }
       : null,
+    recipients: org.reportRecipients.map((r) => ({
+      id: r.id,
+      email: r.email,
+      name: r.name,
+      role: r.role,
+      reportDepth: r.reportDepth,
+      channels: r.channels,
+      slackUserId: r.slackUserId,
+      active: r.active,
+    })),
     reports: org.reports.map((r) => ({
       id: r.id,
       type: r.type,

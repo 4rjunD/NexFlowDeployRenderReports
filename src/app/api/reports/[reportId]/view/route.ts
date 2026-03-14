@@ -51,6 +51,8 @@ export async function GET(
   const content = (report.content as Record<string, any>) || {};
   const orgName = report.organization?.name || "Your Organization";
   const integrationData = content.integrationData || {};
+  const reportDepth = (delivery.reportDepth as "EXECUTIVE" | "STANDARD" | "FULL") || null;
+  const recipientName = delivery.recipientName || null;
 
   // Compute health score
   const priorDeliveries = await prisma.reportDelivery.count({
@@ -82,6 +84,8 @@ export async function GET(
         content,
         showDownloadBar: false,
         healthScore,
+        reportDepth,
+        recipientName,
       });
       const pdfBuffer = await htmlToPdf(html);
       const sanitizedTitle = report.title.replace(/[^a-zA-Z0-9\s\-–—]/g, "").replace(/\s+/g, "-").slice(0, 80);
@@ -99,7 +103,7 @@ export async function GET(
     }
   }
 
-  // Serve the full HTML report with download bar
+  // Serve the HTML report with download bar, filtered by recipient's depth
   const html = buildReportHtml({
     title: report.title,
     orgName,
@@ -110,6 +114,8 @@ export async function GET(
     content,
     showDownloadBar: true,
     healthScore,
+    reportDepth,
+    recipientName,
   });
 
   return new NextResponse(html, {

@@ -29,6 +29,7 @@ interface ReportActionsProps {
   userRole?: string
   aiNarrative: string | null
   summary: string | null
+  orgId?: string
   onNarrativeChange?: (newNarrative: string) => void
   onSummaryChange?: (newSummary: string) => void
 }
@@ -39,6 +40,7 @@ export function ReportActions({
   userRole,
   aiNarrative,
   summary,
+  orgId,
   onNarrativeChange,
   onSummaryChange,
 }: ReportActionsProps) {
@@ -61,6 +63,9 @@ export function ReportActions({
   const [deliverOpen, setDeliverOpen] = useState(false)
   const [deliverEmail, setDeliverEmail] = useState("")
   const [delivering, setDelivering] = useState(false)
+  const [deliverAllLoading, setDeliverAllLoading] = useState(false)
+  const [deliverResult, setDeliverResult] = useState<string | null>(null)
+  const [recipientCount, setRecipientCount] = useState<number | null>(null)
 
   // Review dialog
   const [reviewAction, setReviewAction] = useState<"APPROVE" | "REJECT" | null>(null)
@@ -155,6 +160,7 @@ export function ReportActions({
   async function handleDeliver() {
     if (!deliverEmail) return
     setDelivering(true)
+    setDeliverResult(null)
     try {
       const res = await fetch(`/api/reports/${reportId}/deliver`, {
         method: "POST",
@@ -176,6 +182,45 @@ export function ReportActions({
       setDelivering(false)
     }
   }
+
+  async function handleDeliverToAll() {
+    setDeliverAllLoading(true)
+    setDeliverResult(null)
+    try {
+      const res = await fetch(`/api/reports/${reportId}/deliver`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deliverToAll: true }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setDeliverResult(`Error: ${data.error}`)
+        return
+      }
+      setDeliverResult(`${data.sent} sent, ${data.failed} failed out of ${data.totalRecipients} recipients`)
+      setTimeout(() => {
+        setDeliverOpen(false)
+        setDeliverResult(null)
+        router.refresh()
+      }, 2500)
+    } catch {
+      setDeliverResult("Network error")
+    } finally {
+      setDeliverAllLoading(false)
+    }
+  }
+
+  // Fetch recipient count when deliver dialog opens
+  React.useEffect(() => {
+    if (deliverOpen && orgId) {
+      fetch(`/api/org/recipients?orgId=${orgId}`)
+        .then((res) => res.json())
+        .then((data) => {
+          setRecipientCount(data.recipients?.filter((r: any) => r.active)?.length ?? 0)
+        })
+        .catch(() => setRecipientCount(0))
+    }
+  }, [deliverOpen, orgId])
 
   return (
     <>
@@ -401,16 +446,51 @@ export function ReportActions({
       </Dialog>
 
       {/* Deliver Dialog */}
-      <Dialog open={deliverOpen} onOpenChange={setDeliverOpen}>
-        <DialogContent>
+      <Dialog open={deliverOpen} onOpenChange={(open) => { setDeliverOpen(open); if (!open) setDeliverResult(null) }}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Send Report to Client</DialogTitle>
+            <DialogTitle>Deliver Report</DialogTitle>
             <DialogDescription>
-              This will email the report narrative and summary to the client.
+              Send role-tailored reports to configured recipients, or deliver to a single email.
             </DialogDescription>
           </DialogHeader>
+
+          {/* Deliver to All Recipients */}
+          {recipientCount !== null && recipientCount > 0 && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/20 p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Deliver to All Recipients</p>
+                  <p className="text-xs text-muted-foreground">{recipientCount} active recipients — each gets their role-tailored report depth</p>
+                </div>
+              </div>
+              <Button
+                onClick={handleDeliverToAll}
+                disabled={deliverAllLoading || delivering}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                <Send className="mr-1 h-3.5 w-3.5" />
+                {deliverAllLoading ? "Delivering..." : `Send to All ${recipientCount} Recipients`}
+              </Button>
+            </div>
+          )}
+
+          {recipientCount === 0 && (
+            <p className="text-xs text-muted-foreground rounded-md border px-3 py-2 bg-muted/30">
+              No recipients configured. Add recipients in the client detail page to use bulk delivery.
+            </p>
+          )}
+
+          {/* Divider */}
+          <div className="flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground">or send to a specific email</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
+          {/* Single Email */}
           <div>
-            <label className="text-sm font-medium">Client Email</label>
+            <label className="text-sm font-medium">Email Address</label>
             <Input
               className="mt-1"
               type="email"
@@ -419,13 +499,20 @@ export function ReportActions({
               onChange={(e) => setDeliverEmail(e.target.value)}
             />
           </div>
+
+          {deliverResult && (
+            <p className={`text-xs rounded-md px-3 py-2 ${deliverResult.startsWith("Error") ? "bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-300" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-300"}`}>
+              {deliverResult}
+            </p>
+          )}
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeliverOpen(false)}>
               Cancel
             </Button>
             <Button
               onClick={handleDeliver}
-              disabled={delivering || !deliverEmail}
+              disabled={delivering || deliverAllLoading || !deliverEmail}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
               <Send className="mr-1 h-3.5 w-3.5" />

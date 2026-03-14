@@ -1353,6 +1353,8 @@ interface ReportHtmlOptions {
   content: Record<string, any>;
   showDownloadBar?: boolean;
   healthScore?: HealthScore | null;
+  reportDepth?: "EXECUTIVE" | "STANDARD" | "FULL" | null;
+  recipientName?: string | null;
 }
 
 export function buildReportHtml(opts: ReportHtmlOptions): string {
@@ -1366,6 +1368,8 @@ export function buildReportHtml(opts: ReportHtmlOptions): string {
     content,
     showDownloadBar = false,
     healthScore = null,
+    reportDepth = null,
+    recipientName = null,
   } = opts;
 
   const periodLabel = `${format(periodStart, "MMM d")} — ${format(periodEnd, "MMM d, yyyy")}`;
@@ -1395,6 +1399,26 @@ export function buildReportHtml(opts: ReportHtmlOptions): string {
     ...discoverProgression(content),
   ];
 
+  // ── Apply depth-based filtering ──
+  const EXECUTIVE_EXCLUDE_LABELS = new Set([
+    "Code Churn Analysis", "Communication Patterns", "Contributor Highlights",
+    "Thread Response Time", "Benchmarks", "Progression Tracking",
+    "Deliverable Progress", "Trend Signals",
+  ]);
+  const STANDARD_EXCLUDE_LABELS = new Set([
+    "Communication Patterns", "Benchmarks", "Progression Tracking",
+  ]);
+  const ALWAYS_KEEP = new Set(["Engineering Health Index", "What changed since last report"]);
+
+  if (reportDepth === "EXECUTIVE" || reportDepth === "STANDARD") {
+    const excludeSet = reportDepth === "EXECUTIVE" ? EXECUTIVE_EXCLUDE_LABELS : STANDARD_EXCLUDE_LABELS;
+    for (let i = allDiscoveries.length - 1; i >= 0; i--) {
+      if (!ALWAYS_KEEP.has(allDiscoveries[i].label) && excludeSet.has(allDiscoveries[i].label)) {
+        allDiscoveries.splice(i, 1);
+      }
+    }
+  }
+
   // Sort: red first, then amber, purple, blue, green, neutral
   const colorOrder: Record<string, number> = { red: 0, amber: 1, purple: 2, blue: 3, green: 4, neutral: 5 };
   // But keep health score first always, and "What changed" second
@@ -1403,10 +1427,13 @@ export function buildReportHtml(opts: ReportHtmlOptions): string {
 
   allDiscoveries.sort((a, b) => (colorOrder[a.color] ?? 5) - (colorOrder[b.color] ?? 5));
 
+  // Cap discovery count by depth
+  const maxCards = reportDepth === "EXECUTIVE" ? 5 : reportDepth === "STANDARD" ? 12 : 999;
+
   const orderedDiscoveries: Discovery[] = [];
   if (healthDiscovery) orderedDiscoveries.push(healthDiscovery);
   if (priorActionsDiscovery) orderedDiscoveries.push(priorActionsDiscovery);
-  orderedDiscoveries.push(...allDiscoveries);
+  orderedDiscoveries.push(...allDiscoveries.slice(0, maxCards - orderedDiscoveries.length));
 
   const discoveryCount = orderedDiscoveries.length;
 

@@ -812,6 +812,7 @@ export function WeeklyDigestView({
             userRole={userRole}
             aiNarrative={report.aiNarrative}
             summary={report.summary}
+            orgId={(report as any).orgId}
           />
         </div>
       )}
@@ -856,11 +857,17 @@ export function WeeklyDigestView({
           </div>
           <div className="p-6">
             <div className="space-y-2">
-              {report.deliveries.map((delivery) => (
+              {report.deliveries.map((delivery: any) => (
                 <div key={delivery.id} className="flex items-center justify-between rounded-lg border px-4 py-3">
                   <div className="flex items-center gap-3">
                     <Badge variant="outline" className="text-xs">{delivery.channel}</Badge>
                     <span className="text-sm">{delivery.recipientName ?? delivery.recipientEmail ?? "Unknown"}</span>
+                    {delivery.recipientRole && (
+                      <Badge variant="outline" className="text-[10px] px-1.5">{delivery.recipientRole.replace(/_/g, " ")}</Badge>
+                    )}
+                    {delivery.reportDepth && (
+                      <Badge variant="outline" className="text-[10px] px-1.5">{delivery.reportDepth}</Badge>
+                    )}
                   </div>
                   <Badge className={cn("text-xs",
                     delivery.status === "SENT" ? "bg-emerald-100 text-emerald-700"

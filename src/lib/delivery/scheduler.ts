@@ -104,22 +104,39 @@ export async function autoDeliverReport(
   const jira = (integrationData.jira as Record<string, any> | undefined);
   if (jira?.issues?.overdue?.length) topDiscoveries.push(`${jira.issues.overdue.length} overdue tickets`);
 
+  // ── Use ReportRecipient model first, fall back to legacy config.recipients ──
+  const orgRecipients = report.organization?.id
+    ? await prisma.reportRecipient.findMany({
+        where: { orgId: report.organization.id, active: true },
+      })
+    : [];
+
   const deliveryPromises: Promise<void>[] = [];
 
-  for (const recipient of config.recipients) {
-    // Email delivery — link-based
-    if (recipient.email && config.channels.includes("EMAIL")) {
-      deliveryPromises.push(
-        (async () => {
+  if (orgRecipients.length > 0) {
+    // Enterprise path: use ReportRecipient with role-aware delivery
+    const { subjectForRole } = await import("@/lib/delivery/role-sections");
+
+    const BATCH_SIZE = 20;
+    for (let i = 0; i < orgRecipients.length; i += BATCH_SIZE) {
+      const batch = orgRecipients.slice(i, i + BATCH_SIZE);
+      const batchPromises = batch.map(async (r) => {
+        // Email delivery
+        if (r.channels.includes("EMAIL")) {
           const delivery = await prisma.reportDelivery.create({
-            data: { reportId, channel: "EMAIL", recipientEmail: recipient.email, status: "PENDING" },
+            data: {
+              reportId, channel: "EMAIL", recipientEmail: r.email,
+              recipientName: r.name, recipientRole: r.role, reportDepth: r.reportDepth,
+              status: "PENDING",
+            },
           });
           const reportViewUrl = `${baseUrl}/api/reports/${reportId}/view?token=${delivery.id}`;
           const pdfDownloadUrl = `${reportViewUrl}&format=pdf`;
+          const subject = subjectForRole(r.role, report.title);
           try {
             await sendReportEmail({
-              to: recipient.email!,
-              subject: `${report.title} — NexFlow Report`,
+              to: r.email,
+              subject,
               reportTitle: report.title,
               orgName,
               kpis,
@@ -127,6 +144,9 @@ export async function autoDeliverReport(
               pdfDownloadUrl,
               healthScore,
               topDiscoveries: topDiscoveries.slice(0, 3),
+              recipientName: r.name,
+              recipientRole: r.role,
+              reportDepth: r.reportDepth,
             });
             await prisma.reportDelivery.update({
               where: { id: delivery.id },
@@ -138,35 +158,33 @@ export async function autoDeliverReport(
               where: { id: delivery.id },
               data: { status: "FAILED", error: err instanceof Error ? err.message : "Unknown" },
             });
-            result.errors.push(`Email to ${recipient.email} failed: ${err instanceof Error ? err.message : "Unknown"}`);
+            result.errors.push(`Email to ${r.email} failed: ${err instanceof Error ? err.message : "Unknown"}`);
           }
-        })()
-      );
-    }
+        }
 
-    // Slack delivery
-    if (recipient.slackChannel && config.channels.includes("SLACK") && report.organization?.id) {
-      deliveryPromises.push(
-        (async () => {
+        // Slack DM delivery
+        if (r.channels.includes("SLACK") && r.slackUserId && report.organization?.id) {
           const delivery = await prisma.reportDelivery.create({
-            data: { reportId, channel: "SLACK", recipientEmail: recipient.slackChannel, status: "PENDING" },
+            data: {
+              reportId, channel: "SLACK", recipientEmail: r.slackUserId,
+              recipientName: r.name, recipientRole: r.role, reportDepth: r.reportDepth,
+              status: "PENDING",
+            },
           });
           try {
             const discoveries = extractTopDiscoveries(content as Record<string, unknown>);
             const actionItems = ((content as Record<string, unknown>).actionItems as { priority: string; title: string }[]) || [];
             const reportViewUrl = `${baseUrl}/api/reports/${reportId}/view?token=${delivery.id}`;
-
             const slackResult = await deliverReportToSlack({
               orgId: report.organization!.id,
               reportId,
-              channel: recipient.slackChannel!,
+              channel: r.slackUserId,
               healthScore,
               discoveries,
               actionItems,
               reportTitle: report.title,
               reportUrl: reportViewUrl,
             });
-
             if (slackResult.ok) {
               await prisma.reportDelivery.update({
                 where: { id: delivery.id },
@@ -181,14 +199,93 @@ export async function autoDeliverReport(
               where: { id: delivery.id },
               data: { status: "FAILED", error: err instanceof Error ? err.message : "Unknown" },
             });
-            result.errors.push(`Slack to ${recipient.slackChannel} failed: ${err instanceof Error ? err.message : "Unknown"}`);
+            result.errors.push(`Slack to ${r.slackUserId} failed: ${err instanceof Error ? err.message : "Unknown"}`);
           }
-        })()
-      );
+        }
+      });
+      await Promise.allSettled(batchPromises);
     }
-  }
+  } else {
+    // Legacy path: use config.recipients
+    for (const recipient of config.recipients) {
+      if (recipient.email && config.channels.includes("EMAIL")) {
+        deliveryPromises.push(
+          (async () => {
+            const delivery = await prisma.reportDelivery.create({
+              data: { reportId, channel: "EMAIL", recipientEmail: recipient.email, status: "PENDING" },
+            });
+            const reportViewUrl = `${baseUrl}/api/reports/${reportId}/view?token=${delivery.id}`;
+            const pdfDownloadUrl = `${reportViewUrl}&format=pdf`;
+            try {
+              await sendReportEmail({
+                to: recipient.email!,
+                subject: `${report.title} — NexFlow Report`,
+                reportTitle: report.title,
+                orgName,
+                kpis,
+                reportViewUrl,
+                pdfDownloadUrl,
+                healthScore,
+                topDiscoveries: topDiscoveries.slice(0, 3),
+              });
+              await prisma.reportDelivery.update({
+                where: { id: delivery.id },
+                data: { status: "SENT", sentAt: new Date() },
+              });
+              result.emailsSent++;
+            } catch (err) {
+              await prisma.reportDelivery.update({
+                where: { id: delivery.id },
+                data: { status: "FAILED", error: err instanceof Error ? err.message : "Unknown" },
+              });
+              result.errors.push(`Email to ${recipient.email} failed: ${err instanceof Error ? err.message : "Unknown"}`);
+            }
+          })()
+        );
+      }
 
-  await Promise.allSettled(deliveryPromises);
+      if (recipient.slackChannel && config.channels.includes("SLACK") && report.organization?.id) {
+        deliveryPromises.push(
+          (async () => {
+            const delivery = await prisma.reportDelivery.create({
+              data: { reportId, channel: "SLACK", recipientEmail: recipient.slackChannel, status: "PENDING" },
+            });
+            try {
+              const discoveries = extractTopDiscoveries(content as Record<string, unknown>);
+              const actionItems = ((content as Record<string, unknown>).actionItems as { priority: string; title: string }[]) || [];
+              const reportViewUrl = `${baseUrl}/api/reports/${reportId}/view?token=${delivery.id}`;
+              const slackResult = await deliverReportToSlack({
+                orgId: report.organization!.id,
+                reportId,
+                channel: recipient.slackChannel!,
+                healthScore,
+                discoveries,
+                actionItems,
+                reportTitle: report.title,
+                reportUrl: reportViewUrl,
+              });
+              if (slackResult.ok) {
+                await prisma.reportDelivery.update({
+                  where: { id: delivery.id },
+                  data: { status: "SENT", sentAt: new Date() },
+                });
+                result.slacksSent++;
+              } else {
+                throw new Error(slackResult.error || "Slack delivery failed");
+              }
+            } catch (err) {
+              await prisma.reportDelivery.update({
+                where: { id: delivery.id },
+                data: { status: "FAILED", error: err instanceof Error ? err.message : "Unknown" },
+              });
+              result.errors.push(`Slack to ${recipient.slackChannel} failed: ${err instanceof Error ? err.message : "Unknown"}`);
+            }
+          })()
+        );
+      }
+    }
+    await Promise.allSettled(deliveryPromises);
+  }
 
   if (result.emailsSent > 0 || result.slacksSent > 0) {
     await prisma.report.update({

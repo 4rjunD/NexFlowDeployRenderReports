@@ -61,6 +61,7 @@ model Organization {
   events            Event[]
   integrations      Integration[]
   reportContexts    ReportContext[]
+  reportRecipients  ReportRecipient[]
   reports           Report[]
   signals           Signal[]
   sprints           Sprint[]
@@ -233,6 +234,9 @@ model ReportDelivery {
   channel        DeliveryChannel @default(IN_APP)
   recipientId    String?         @map("recipient_id")
   recipientEmail String?         @map("recipient_email")
+  recipientName  String?         @map("recipient_name")
+  recipientRole  String?         @map("recipient_role")
+  reportDepth    String?         @map("report_depth")
   status         DeliveryStatus  @default(PENDING)
   sentAt         DateTime?       @map("sent_at")
   openedAt       DateTime?       @map("opened_at")
@@ -262,6 +266,25 @@ model ReportContext {
 
   @@index([orgId, createdAt])
   @@map("report_contexts")
+}
+
+model ReportRecipient {
+  id             String          @id @default(cuid())
+  orgId          String          @map("org_id")
+  email          String
+  name           String
+  role           RecipientRole   @default(TEAM_LEAD)
+  reportDepth    ReportDepth     @default(FULL)
+  channels       String[]        @default(["EMAIL"])
+  slackUserId    String?         @map("slack_user_id")
+  active         Boolean         @default(true)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  organization   Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, email])
+  @@index([orgId, active])
+  @@map("report_recipients")
 }
 
 model DeliveryPreference {
@@ -336,4 +359,20 @@ enum DeliveryStatus {
   PENDING
   SENT
   FAILED
+}
+
+enum RecipientRole {
+  CTO
+  VP_ENG
+  ENG_DIRECTOR
+  TEAM_LEAD
+  ENGINEERING_MANAGER
+  IC
+  STAKEHOLDER
+}
+
+enum ReportDepth {
+  EXECUTIVE
+  STANDARD
+  FULL
 }
