@@ -5,9 +5,31 @@ import prisma from "@/lib/db/prisma";
 const VALID_ROLES = ["CTO", "VP_ENG", "ENG_DIRECTOR", "TEAM_LEAD", "ENGINEERING_MANAGER", "IC", "STAKEHOLDER"];
 const VALID_DEPTHS = ["EXECUTIVE", "STANDARD", "FULL"];
 
+// ── Simple in-memory rate limiter ──
+// Max 5 imports per org per 10 minutes
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const RATE_LIMIT_MAX = 5;
+const importHistory = new Map<string, number[]>();
+
+function checkRateLimit(orgId: string): { allowed: boolean; retryAfterMs: number } {
+  const now = Date.now();
+  const history = importHistory.get(orgId) || [];
+  // Remove entries outside window
+  const recent = history.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+  importHistory.set(orgId, recent);
+
+  if (recent.length >= RATE_LIMIT_MAX) {
+    const oldest = recent[0];
+    return { allowed: false, retryAfterMs: RATE_LIMIT_WINDOW_MS - (now - oldest) };
+  }
+  recent.push(now);
+  return { allowed: true, retryAfterMs: 0 };
+}
+
 // POST — import recipients from CSV text
 // Expected CSV format: email,name,role,reportDepth
 // First row is header (skipped)
+// Rate limited: 5 imports per org per 10 minutes
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -20,6 +42,21 @@ export async function POST(request: NextRequest) {
 
   if (!orgId || !csv) {
     return NextResponse.json({ error: "orgId and csv are required" }, { status: 400 });
+  }
+
+  // Rate limit check
+  const rateCheck = checkRateLimit(orgId);
+  if (!rateCheck.allowed) {
+    const retryAfterSec = Math.ceil(rateCheck.retryAfterMs / 1000);
+    return NextResponse.json(
+      { error: `Rate limit exceeded. Try again in ${retryAfterSec} seconds.` },
+      { status: 429, headers: { "Retry-After": String(retryAfterSec) } }
+    );
+  }
+
+  // Cap CSV size at 1MB to prevent abuse
+  if (csv.length > 1_000_000) {
+    return NextResponse.json({ error: "CSV too large. Maximum 1MB." }, { status: 400 });
   }
 
   const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { id: true } });

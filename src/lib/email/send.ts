@@ -36,6 +36,7 @@ interface SendReportEmailOptions {
   recipientName?: string;
   recipientRole?: string;
   reportDepth?: string;
+  unsubscribeUrl?: string;
 }
 
 export async function sendReportEmail({
@@ -51,6 +52,7 @@ export async function sendReportEmail({
   recipientName,
   recipientRole,
   reportDepth,
+  unsubscribeUrl,
 }: SendReportEmailOptions) {
   // Role-aware greeting and depth label
   const greeting = recipientName ? `Hi ${recipientName.split(" ")[0]},` : "";
@@ -160,6 +162,7 @@ export async function sendReportEmail({
               <p style="margin: 0; font-size: 9px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px;">
                 Confidential — intended for the recipient only
               </p>
+              ${unsubscribeUrl ? `<p style="margin: 8px 0 0; font-size: 9px; color: #ccc;"><a href="${unsubscribeUrl}" style="color: #ccc; text-decoration: underline;">Unsubscribe from reports</a></p>` : ""}
             </td>
           </tr>
         </table>
@@ -169,12 +172,22 @@ export async function sendReportEmail({
 </body>
 </html>`;
 
-  const result = await transporter.sendMail({
+  const mailOptions: Record<string, any> = {
     from: process.env.EMAIL_FROM || process.env.SMTP_USER,
     to,
     subject,
     html,
-  });
+  };
+
+  // Add List-Unsubscribe header for email client native unsubscribe
+  if (unsubscribeUrl) {
+    mailOptions.headers = {
+      "List-Unsubscribe": `<${unsubscribeUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    };
+  }
+
+  const result = await transporter.sendMail(mailOptions);
 
   return result;
 }

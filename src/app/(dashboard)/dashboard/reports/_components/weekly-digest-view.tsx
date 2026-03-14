@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   ArrowLeft,
   Calendar,
@@ -27,6 +28,10 @@ import {
   Activity,
   CheckCircle2,
   Target,
+  RefreshCw,
+  AlertTriangle,
+  Mail,
+  MailOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ReviewStatusBanner } from "@/components/dashboard/review-status-banner"
@@ -850,39 +855,201 @@ export function WeeklyDigestView({
 
       {/* ── Delivery History ── */}
       {report.deliveries.length > 0 && (
-        <section className="rounded-xl border bg-card mb-8">
-          <div className="flex items-center gap-2.5 px-6 py-4 border-b">
-            <Send className="h-5 w-5 text-muted-foreground" />
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Delivery History</h2>
-          </div>
-          <div className="p-6">
-            <div className="space-y-2">
-              {report.deliveries.map((delivery: any) => (
-                <div key={delivery.id} className="flex items-center justify-between rounded-lg border px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <Badge variant="outline" className="text-xs">{delivery.channel}</Badge>
-                    <span className="text-sm">{delivery.recipientName ?? delivery.recipientEmail ?? "Unknown"}</span>
-                    {delivery.recipientRole && (
-                      <Badge variant="outline" className="text-[10px] px-1.5">{delivery.recipientRole.replace(/_/g, " ")}</Badge>
-                    )}
-                    {delivery.reportDepth && (
-                      <Badge variant="outline" className="text-[10px] px-1.5">{delivery.reportDepth}</Badge>
-                    )}
-                  </div>
-                  <Badge className={cn("text-xs",
-                    delivery.status === "SENT" ? "bg-emerald-100 text-emerald-700"
-                    : delivery.status === "FAILED" ? "bg-red-100 text-red-700"
-                    : "bg-yellow-100 text-yellow-700"
-                  )}>
-                    {delivery.status}
-                    {delivery.sentAt && ` · ${format(new Date(delivery.sentAt), "MMM d, h:mm a")}`}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
+        <DeliveryHistorySection deliveries={report.deliveries} reportId={report.id} userRole={userRole} />
       )}
     </div>
+  )
+}
+
+// ── Delivery History with per-recipient status tracking + resend ──
+
+const DELIVERY_STATUS_CONFIG: Record<string, { color: string; icon: React.ElementType; label: string }> = {
+  PENDING: { color: "bg-yellow-100 text-yellow-700", icon: Clock, label: "Pending" },
+  SENT: { color: "bg-emerald-100 text-emerald-700", icon: Mail, label: "Sent" },
+  DELIVERED: { color: "bg-blue-100 text-blue-700", icon: CheckCircle2, label: "Delivered" },
+  BOUNCED: { color: "bg-red-100 text-red-700", icon: AlertTriangle, label: "Bounced" },
+  FAILED: { color: "bg-red-100 text-red-700", icon: AlertTriangle, label: "Failed" },
+}
+
+function DeliveryHistorySection({ deliveries, reportId, userRole }: { deliveries: any[]; reportId: string; userRole?: string }) {
+  const router = useRouter()
+  const [resending, setResending] = useState<Set<string>>(new Set())
+  const [resendAllLoading, setResendAllLoading] = useState(false)
+  const [resendResult, setResendResult] = useState<string | null>(null)
+
+  const failedDeliveries = deliveries.filter((d) => d.status === "FAILED" || d.status === "BOUNCED")
+  const isAdmin = userRole === "ADMIN"
+
+  async function handleResendOne(deliveryId: string) {
+    setResending((prev) => new Set(prev).add(deliveryId))
+    try {
+      const res = await fetch(`/api/reports/${reportId}/resend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deliveryIds: [deliveryId] }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setResendResult(`Resend: ${data.message}`)
+        setTimeout(() => { setResendResult(null); router.refresh() }, 2000)
+      } else {
+        setResendResult(`Error: ${data.error}`)
+      }
+    } catch {
+      setResendResult("Network error")
+    } finally {
+      setResending((prev) => { const next = new Set(prev); next.delete(deliveryId); return next })
+    }
+  }
+
+  async function handleResendAllFailed() {
+    setResendAllLoading(true)
+    setResendResult(null)
+    try {
+      const res = await fetch(`/api/reports/${reportId}/resend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resendAllFailed: true }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setResendResult(data.message)
+        setTimeout(() => { setResendResult(null); router.refresh() }, 2500)
+      } else {
+        setResendResult(`Error: ${data.error}`)
+      }
+    } catch {
+      setResendResult("Network error")
+    } finally {
+      setResendAllLoading(false)
+    }
+  }
+
+  // Summary stats
+  const sent = deliveries.filter((d) => d.status === "SENT" || d.status === "DELIVERED").length
+  const opened = deliveries.filter((d) => d.openedAt).length
+  const bounced = deliveries.filter((d) => d.status === "BOUNCED").length
+  const failed = deliveries.filter((d) => d.status === "FAILED").length
+
+  return (
+    <section className="rounded-xl border bg-card mb-8">
+      <div className="flex items-center justify-between px-6 py-4 border-b">
+        <div className="flex items-center gap-2.5">
+          <Send className="h-5 w-5 text-muted-foreground" />
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Delivery Status</h2>
+        </div>
+        {isAdmin && failedDeliveries.length > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-red-600 border-red-200 hover:bg-red-50"
+            onClick={handleResendAllFailed}
+            disabled={resendAllLoading}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", resendAllLoading && "animate-spin")} />
+            {resendAllLoading ? "Resending..." : `Resend ${failedDeliveries.length} Failed`}
+          </Button>
+        )}
+      </div>
+
+      <div className="p-6 space-y-4">
+        {/* Summary bar */}
+        <div className="flex gap-4 text-xs">
+          <div className="flex items-center gap-1.5">
+            <Mail className="h-3.5 w-3.5 text-emerald-600" />
+            <span className="text-muted-foreground">{sent} sent</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <MailOpen className="h-3.5 w-3.5 text-blue-600" />
+            <span className="text-muted-foreground">{opened} opened</span>
+          </div>
+          {bounced > 0 && (
+            <div className="flex items-center gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
+              <span className="text-red-600">{bounced} bounced</span>
+            </div>
+          )}
+          {failed > 0 && (
+            <div className="flex items-center gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
+              <span className="text-red-600">{failed} failed</span>
+            </div>
+          )}
+        </div>
+
+        {resendResult && (
+          <p className={cn("text-xs rounded-md px-3 py-2",
+            resendResult.startsWith("Error") ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"
+          )}>{resendResult}</p>
+        )}
+
+        {/* Per-recipient rows */}
+        <div className="space-y-2">
+          {deliveries.map((delivery: any) => {
+            const statusConfig = DELIVERY_STATUS_CONFIG[delivery.status] || DELIVERY_STATUS_CONFIG.PENDING
+            const StatusIcon = statusConfig.icon
+            const isFailed = delivery.status === "FAILED" || delivery.status === "BOUNCED"
+            const isResending = resending.has(delivery.id)
+
+            return (
+              <div key={delivery.id} className={cn(
+                "flex items-center justify-between rounded-lg border px-4 py-3",
+                isFailed && "border-red-200 bg-red-50/30 dark:border-red-800 dark:bg-red-950/10"
+              )}>
+                <div className="flex items-center gap-3 min-w-0">
+                  <StatusIcon className={cn("h-4 w-4 flex-shrink-0",
+                    delivery.status === "SENT" || delivery.status === "DELIVERED" ? "text-emerald-600" :
+                    isFailed ? "text-red-500" : "text-yellow-500"
+                  )} />
+                  <Badge variant="outline" className="text-xs flex-shrink-0">{delivery.channel}</Badge>
+                  <div className="min-w-0">
+                    <span className="text-sm truncate block">{delivery.recipientName ?? delivery.recipientEmail ?? "Unknown"}</span>
+                    {delivery.recipientEmail && delivery.recipientName && (
+                      <span className="text-[11px] text-muted-foreground truncate block">{delivery.recipientEmail}</span>
+                    )}
+                  </div>
+                  {delivery.recipientRole && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 flex-shrink-0">{delivery.recipientRole.replace(/_/g, " ")}</Badge>
+                  )}
+                  {delivery.reportDepth && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 flex-shrink-0">{delivery.reportDepth}</Badge>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {/* Open tracking indicator */}
+                  {delivery.openedAt && (
+                    <div className="flex items-center gap-1" title={`Opened ${format(new Date(delivery.openedAt), "MMM d, h:mm a")} · ${delivery.viewCount || 1} view(s)`}>
+                      <MailOpen className="h-3.5 w-3.5 text-blue-500" />
+                      <span className="text-[10px] text-blue-600">{delivery.viewCount || 1}x</span>
+                    </div>
+                  )}
+                  {/* Error tooltip */}
+                  {delivery.error && (
+                    <span className="text-[10px] text-red-500 max-w-[140px] truncate" title={delivery.error}>{delivery.error}</span>
+                  )}
+                  <Badge className={cn("text-xs", statusConfig.color)}>
+                    {statusConfig.label}
+                    {delivery.sentAt && ` · ${format(new Date(delivery.sentAt), "MMM d, h:mm a")}`}
+                  </Badge>
+                  {/* Resend button for failed */}
+                  {isAdmin && isFailed && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => handleResendOne(delivery.id)}
+                      disabled={isResending}
+                    >
+                      <RefreshCw className={cn("h-3 w-3 mr-1", isResending && "animate-spin")} />
+                      {isResending ? "..." : "Retry"}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </section>
   )
 }

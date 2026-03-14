@@ -84,7 +84,7 @@ export async function POST(
     // ─── Enterprise: Deliver to all configured recipients ───
     if (parsed.data.deliverToAll && orgId) {
       const recipients = await prisma.reportRecipient.findMany({
-        where: { orgId, active: true },
+        where: { orgId, active: true, unsubscribedAt: null },
         orderBy: { role: "asc" },
       });
 
@@ -92,6 +92,20 @@ export async function POST(
         return NextResponse.json(
           { error: "No active recipients configured for this organization. Add recipients first." },
           { status: 400 }
+        );
+      }
+
+      // Ensure all recipients have unsubscribe tokens
+      const needTokens = recipients.filter((r) => !r.unsubscribeToken);
+      if (needTokens.length > 0) {
+        const crypto = await import("crypto");
+        await Promise.all(
+          needTokens.map((r) =>
+            prisma.reportRecipient.update({
+              where: { id: r.id },
+              data: { unsubscribeToken: crypto.randomBytes(24).toString("hex") },
+            }).then((updated) => { r.unsubscribeToken = updated.unsubscribeToken; })
+          )
         );
       }
 
@@ -114,6 +128,7 @@ export async function POST(
               healthScore,
               topDiscoveries,
               baseUrl,
+              unsubscribeToken: r.unsubscribeToken,
               results,
             });
           }
@@ -222,11 +237,12 @@ interface EmailDeliveryOpts {
   healthScore: any;
   topDiscoveries: string[];
   baseUrl: string;
+  unsubscribeToken?: string | null;
   results: { recipient: string; channel: string; role?: string; depth?: string; status: string; error?: string }[];
 }
 
 async function deliverEmailToRecipient(opts: EmailDeliveryOpts) {
-  const { reportId, reportTitle, email, name, role, depth, orgName, kpis, healthScore, topDiscoveries, baseUrl, results } = opts;
+  const { reportId, reportTitle, email, name, role, depth, orgName, kpis, healthScore, topDiscoveries, baseUrl, unsubscribeToken, results } = opts;
 
   const delivery = await prisma.reportDelivery.create({
     data: {
@@ -246,8 +262,10 @@ async function deliverEmailToRecipient(opts: EmailDeliveryOpts) {
   // Role-aware subject line
   const subject = role ? subjectForRole(role, reportTitle) : `${reportTitle} — NexFlow Report`;
 
+  const unsubscribeUrl = unsubscribeToken ? `${baseUrl}/api/unsubscribe?token=${unsubscribeToken}` : undefined;
+
   try {
-    await sendReportEmail({
+    const smtpResult = await sendReportEmail({
       to: email,
       subject,
       reportTitle,
@@ -260,25 +278,37 @@ async function deliverEmailToRecipient(opts: EmailDeliveryOpts) {
       recipientName: name || undefined,
       recipientRole: role || undefined,
       reportDepth: depth || undefined,
+      unsubscribeUrl,
     });
+
+    const smtpResponse = smtpResult?.response || null;
 
     await prisma.reportDelivery.update({
       where: { id: delivery.id },
-      data: { status: "SENT", sentAt: new Date() },
+      data: { status: "SENT", sentAt: new Date(), smtpResponse, deliveredAt: new Date(), lastEventAt: new Date() },
     });
 
     results.push({ recipient: email, channel: "EMAIL", role: role || undefined, depth: depth || undefined, status: "sent" });
   } catch (emailError) {
+    const errorMsg = emailError instanceof Error ? emailError.message : "Unknown";
+    const isBounce = errorMsg.includes("550") || errorMsg.includes("551") || errorMsg.includes("552") || errorMsg.includes("553") || errorMsg.includes("mailbox");
+
     await prisma.reportDelivery.update({
       where: { id: delivery.id },
-      data: { status: "FAILED", error: emailError instanceof Error ? emailError.message : "Unknown" },
+      data: {
+        status: isBounce ? "BOUNCED" : "FAILED",
+        error: errorMsg,
+        smtpResponse: errorMsg,
+        bouncedAt: isBounce ? new Date() : null,
+        lastEventAt: new Date(),
+      },
     });
     results.push({
       recipient: email,
       channel: "EMAIL",
       role: role || undefined,
       status: "failed",
-      error: emailError instanceof Error ? emailError.message : "Unknown",
+      error: errorMsg,
     });
   }
 }

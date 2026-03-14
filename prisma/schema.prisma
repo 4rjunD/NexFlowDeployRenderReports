@@ -242,10 +242,15 @@ model ReportDelivery {
   openedAt       DateTime?       @map("opened_at")
   viewCount      Int             @default(0) @map("view_count")
   error          String?
+  smtpResponse   String?         @map("smtp_response")
+  bouncedAt      DateTime?       @map("bounced_at")
+  deliveredAt    DateTime?       @map("delivered_at")
+  lastEventAt    DateTime?       @map("last_event_at")
   createdAt      DateTime        @default(now()) @map("created_at")
   recipient      User?           @relation(fields: [recipientId], references: [id])
   report         Report          @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
+  @@index([reportId, status])
   @@map("report_deliveries")
 }
 
@@ -269,18 +274,20 @@ model ReportContext {
 }
 
 model ReportRecipient {
-  id             String          @id @default(cuid())
-  orgId          String          @map("org_id")
-  email          String
-  name           String
-  role           RecipientRole   @default(TEAM_LEAD)
-  reportDepth    ReportDepth     @default(FULL)
-  channels       String[]        @default(["EMAIL"])
-  slackUserId    String?         @map("slack_user_id")
-  active         Boolean         @default(true)
-  createdAt      DateTime        @default(now()) @map("created_at")
-  updatedAt      DateTime        @updatedAt @map("updated_at")
-  organization   Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  id               String          @id @default(cuid())
+  orgId            String          @map("org_id")
+  email            String
+  name             String
+  role             RecipientRole   @default(TEAM_LEAD)
+  reportDepth      ReportDepth     @default(FULL)
+  channels         String[]        @default(["EMAIL"])
+  slackUserId      String?         @map("slack_user_id")
+  active           Boolean         @default(true)
+  unsubscribedAt   DateTime?       @map("unsubscribed_at")
+  unsubscribeToken String?         @unique @map("unsubscribe_token")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  organization     Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@unique([orgId, email])
   @@index([orgId, active])
@@ -358,6 +365,8 @@ enum DeliveryChannel {
 enum DeliveryStatus {
   PENDING
   SENT
+  DELIVERED
+  BOUNCED
   FAILED
 }
 
