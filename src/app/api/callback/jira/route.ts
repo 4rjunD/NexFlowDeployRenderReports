@@ -38,17 +38,7 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // Redirect back to onboarding if applicable
-    const onboarding = await prisma.clientOnboarding.findFirst({
-      where: { orgId: state, status: "PENDING" },
-      orderBy: { createdAt: "desc" },
-    });
-
-    const returnTo = onboarding
-      ? `/setup/${onboarding.token}`
-      : `/setup/connected?service=Jira`;
-
-    return NextResponse.redirect(`${baseUrl}${returnTo}`);
+    return NextResponse.redirect(`${baseUrl}/setup/connected?service=Jira`);
   } catch (error) {
     console.error("Jira OAuth callback error:", error);
     return NextResponse.redirect(`${baseUrl}/setup/connected?error=Failed+to+connect+Jira`);

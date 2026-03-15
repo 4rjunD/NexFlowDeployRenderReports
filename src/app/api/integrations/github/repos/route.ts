@@ -6,6 +6,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db/prisma";
 import { fetchRepos } from "@/lib/integrations/github/client";
+import { decryptToken } from "@/lib/crypto";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -24,8 +25,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    console.log(`[NexFlow] Fetching GitHub repos for org ${orgId}, token starts with: ${integration.accessToken.slice(0, 8)}...`);
-    const repos = await fetchRepos(integration.accessToken);
+    let token = integration.accessToken;
+    try { token = decryptToken(token); } catch { /* already plain */ }
+    console.log(`[NexFlow] Fetching GitHub repos for org ${orgId}`);
+    const repos = await fetchRepos(token);
     console.log(`[NexFlow] Found ${repos.length} GitHub repos`);
     const config = (integration.config as Record<string, unknown>) || {};
     const selectedRepos = (config.selectedRepos as string[]) || [];

@@ -33,16 +33,8 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // Check if this came from an onboarding flow — find the onboarding token
-    const onboarding = await prisma.clientOnboarding.findFirst({
-      where: { orgId: state, status: "PENDING" },
-      orderBy: { createdAt: "desc" },
-    });
-
-    // Redirect to repo selection page so user can pick which repos to analyze
-    const returnTo = onboarding
-      ? `/setup/${onboarding.token}`
-      : `/setup/connected?service=GitHub`;
+    // Redirect to repo selection page, then to success page
+    const returnTo = `/setup/connected?service=GitHub`;
 
     return NextResponse.redirect(
       `${baseUrl}/setup/github-repos?orgId=${state}&returnTo=${encodeURIComponent(returnTo)}`

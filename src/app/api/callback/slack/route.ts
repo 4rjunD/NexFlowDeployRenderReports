@@ -18,8 +18,6 @@ export async function GET(request: NextRequest) {
   const state = searchParams.get("state") // orgId
   const error = searchParams.get("error")
 
-  const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/settings`
-
   // Handle user-denied or Slack-side errors
   if (error) {
     console.error("Slack OAuth denied:", error)
@@ -90,17 +88,9 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    // Redirect back to onboarding setup page if applicable
-    const onboarding = await prisma.clientOnboarding.findFirst({
-      where: { orgId, status: "PENDING" },
-      orderBy: { createdAt: "desc" },
-    })
-
-    const returnTo = onboarding
-      ? `/setup/${onboarding.token}`
-      : `/setup/connected?service=Slack`
-
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}${returnTo}`)
+    return NextResponse.redirect(
+      `${process.env.NEXT_PUBLIC_APP_URL}/setup/connected?service=Slack`
+    )
   } catch (err) {
     console.error("Slack OAuth callback error:", err)
     return NextResponse.redirect(

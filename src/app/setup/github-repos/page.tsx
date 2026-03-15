@@ -148,6 +148,25 @@ export default function GitHubRepoSelectPage() {
           </div>
         )}
 
+        {/* No repos found */}
+        {!loading && !error && repos.length === 0 && !saved && (
+          <div className="flex flex-col items-center justify-center py-24 space-y-4">
+            <div className="h-12 w-12 rounded-full bg-white/[0.06] flex items-center justify-center">
+              <svg className="h-6 w-6 text-white/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+            </div>
+            <div className="text-center">
+              <p className="text-white/60 text-sm font-medium">No repositories found</p>
+              <p className="text-white/30 text-xs mt-1">Make sure the GitHub account has accessible repositories.</p>
+            </div>
+            <button
+              onClick={() => { window.close(); setTimeout(() => window.history.back(), 500) }}
+              className="mt-2 inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] text-sm font-medium text-white/70 transition-colors"
+            >
+              Close &amp; Return to Setup
+            </button>
+          </div>
+        )}
+
         {/* Repo selector */}
         {!loading && repos.length > 0 && !saved && (
           <div className="mt-6 space-y-4">
