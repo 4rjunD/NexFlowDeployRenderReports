@@ -47,7 +47,10 @@ export async function POST(request: Request) {
 
     // Create report record immediately
     const now = new Date();
-    const periodStart = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    // First report gets 14-day lookback for richer data; subsequent reports use 7 days
+    const priorReportCount = await prisma.report.count({ where: { orgId } });
+    const lookbackDays = priorReportCount === 0 ? 14 : 7;
+    const periodStart = new Date(now.getTime() - lookbackDays * 24 * 60 * 60 * 1000);
 
     const report = await prisma.report.create({
       data: {

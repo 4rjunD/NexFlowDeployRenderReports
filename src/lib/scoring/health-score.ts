@@ -9,8 +9,8 @@
 //   Team Capacity (20%)     — Focus time vs meeting load, balance
 //   Communication (15%)     — Slack activity, channel engagement
 //
-// For the FIRST report for any org, the score is nudged down ~8-12 pts
-// to highlight room for improvement and drive engagement.
+// Scoring is lenient with sparse data — even 1-2 connected sources
+// should produce a useful, encouraging baseline score.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type D = Record<string, any>;
@@ -42,7 +42,7 @@ export interface HealthScore {
 }
 
 function scoreDeliveryVelocity(gh: D | null): DimensionScore {
-  if (!gh) return { label: "Delivery Velocity", score: 50, weight: 0.25, color: "#3b82f6", summary: "No GitHub data connected" };
+  if (!gh) return { label: "Delivery Velocity", score: 60, weight: 0.25, color: "#3b82f6", summary: "Connect GitHub for delivery insights" };
 
   const pr = gh.pullRequests || {};
   const merged = n(pr.merged);
@@ -73,7 +73,7 @@ function scoreDeliveryVelocity(gh: D | null): DimensionScore {
 }
 
 function scoreCodeQuality(gh: D | null): DimensionScore {
-  if (!gh) return { label: "Code Quality", score: 50, weight: 0.20, color: "#8b5cf6", summary: "No review data available" };
+  if (!gh) return { label: "Code Quality", score: 60, weight: 0.20, color: "#8b5cf6", summary: "Connect GitHub for review insights" };
 
   const reviews = gh.reviews || {};
   const totalReviews = n(reviews.total);
@@ -105,7 +105,7 @@ function scoreCodeQuality(gh: D | null): DimensionScore {
 }
 
 function scoreSprintExecution(ln: D | null): DimensionScore {
-  if (!ln) return { label: "Sprint Execution", score: 50, weight: 0.20, color: "#f59e0b", summary: "No project management data" };
+  if (!ln) return { label: "Sprint Execution", score: 60, weight: 0.20, color: "#f59e0b", summary: "Connect Jira or Linear for sprint insights" };
 
   const issues = ln.issues || {};
   const total = n(issues.total);
@@ -281,13 +281,7 @@ export function computeHealthScore(integrationData: Record<string, any>, isFirst
   ].filter(d => d.weight > 0); // Only include dimensions with weight
 
   // Weighted average
-  let rawScore = dimensions.reduce((sum, d) => sum + d.score * d.weight, 0);
-
-  // First report nudge: lower by 8-12 points to create urgency
-  if (isFirstReport) {
-    const nudge = 8 + Math.random() * 4;
-    rawScore = Math.max(35, rawScore - nudge);
-  }
+  const rawScore = dimensions.reduce((sum, d) => sum + d.score * d.weight, 0);
 
   const overall = Math.round(clamp(rawScore));
   const { grade, color } = gradeFromScore(overall);
