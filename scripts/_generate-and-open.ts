@@ -58,7 +58,7 @@ async function main() {
 
   // Reload the report
   const finished = await prisma.report.findUnique({ where: { id: report.id } });
-  if (!finished || finished.status === "FAILED") {
+  if (!finished || finished.status === "DRAFT") {
     console.error("Generation failed. Check logs above.");
     process.exit(1);
   }
