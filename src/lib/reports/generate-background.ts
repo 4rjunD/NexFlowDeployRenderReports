@@ -297,7 +297,7 @@ export async function generateReportInBackground(reportId: string, orgId: string
     // Build a summary from actual data
     const dataSources = connectedSources.filter((s) => integrationData[s.toLowerCase()] != null || integrationData[s === "GOOGLE_CALENDAR" ? "googleCalendar" : s.toLowerCase()] != null);
 
-    const title = `Weekly Engineering Digest — ${periodStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })} to ${now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+    const title = `Weekly Engineering Digest, ${periodStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })} to ${now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
     const summary = `Data pulled from ${dataSources.length} live source(s): ${connectedSources.join(", ")}`;
 
     // Build custom instruction from org preferences

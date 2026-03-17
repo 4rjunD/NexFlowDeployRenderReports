@@ -19,7 +19,8 @@ function fmt(v: number, d = 1): string {
   if (Number.isInteger(v)) return v.toLocaleString();
   return v.toFixed(d);
 }
-function esc(s: string): string {
+function esc(s: string | undefined | null): string {
+  if (!s) return "";
   return s
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -130,7 +131,8 @@ function renderDiscovery(d: Discovery, index: number): string {
   }
 
   if (d.bigNum) {
-    html += `<div class="big-num ${d.color}">${d.bigNum.value}</div>`;
+    const isTextVal = isNaN(Number(d.bigNum.value.replace(/[,$%]/g, "")));
+    html += `<div class="big-num ${d.color}${isTextVal ? " text-value" : ""}">${d.bigNum.value}</div>`;
     html += `<div class="big-label">${esc(d.bigNum.label)}</div>`;
   }
 
@@ -204,12 +206,76 @@ function discoverHealthScore(hs: HealthScore | null, content: Record<string, any
       : `Your engineering health is ${hs.overall}/100. Grade: ${hs.grade}.`,
     body: `<strong>This composite score tracks 5 dimensions of engineering effectiveness.</strong> ` +
       hs.dimensions.map((d) =>
-        `<strong>${d.label}</strong> scored ${d.score}/100 — ${d.summary.toLowerCase()}.`
+        `<strong>${d.label}</strong> scored ${d.score}/100: ${d.summary.toLowerCase()}.`
       ).join(" ") +
       (delta != null && delta > 0 ? ` <strong>That's a ${delta}-point improvement since your last report.</strong>` : "") +
-      (delta != null && delta < 0 ? ` That's a ${Math.abs(delta)}-point decline — worth investigating.` : ""),
+      (delta != null && delta < 0 ? ` That's a ${Math.abs(delta)}-point decline, worth investigating.` : ""),
     bigNum: { value: `${hs.overall}`, label: `Engineering Health Index · Grade ${hs.grade}${deltaStr ? ` · ${deltaStr} vs prior` : ""}` },
     dataGrid: grid,
+  }];
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function discoverCelebration(hs: HealthScore | null, content: Record<string, any>): Discovery[] {
+  const wins: string[] = [];
+
+  // Health score improved by 5+ points
+  const priorReport = content.priorReport;
+  const priorScore = priorReport?.keyMetrics?.healthScore as number | undefined;
+  if (hs && priorScore != null) {
+    const delta = hs.overall - priorScore;
+    if (delta >= 5) {
+      wins.push(`Your health score jumped <strong>${delta} points</strong> this period (${priorScore} → ${hs.overall}).`);
+    }
+    // Grade improved
+    const priorGrade = priorReport?.keyMetrics?.healthGrade as string | undefined;
+    if (priorGrade && hs.grade !== priorGrade && hs.overall > priorScore) {
+      wins.push(`Grade upgraded from <strong>${esc(priorGrade)}</strong> to <strong>${hs.grade}</strong>.`);
+    }
+    // Any dimension improved by 10+ points
+    if (hs.dimensions && priorReport?.keyMetrics) {
+      for (const dim of hs.dimensions) {
+        const priorDimKey = dim.label.toLowerCase().replace(/\s+/g, "");
+        // Try to find prior dimension score by matching label patterns
+        for (const [key, val] of Object.entries(priorReport.keyMetrics)) {
+          if (key.toLowerCase().includes(priorDimKey.slice(0, 6)) && typeof val === "number" && dim.score - val >= 10) {
+            wins.push(`<strong>${esc(dim.label)}</strong> improved by ${dim.score - val} points.`);
+          }
+        }
+      }
+    }
+  }
+
+  // Zero stale PRs
+  const stalePrs = content.integrationData?.github?.pullRequests?.stalePrs;
+  if (stalePrs && stalePrs.length === 0 && content.integrationData?.github?.pullRequests?.merged > 0) {
+    wins.push(`Zero stale PRs. Every open PR is moving. That's rare and worth recognizing.`);
+  }
+
+  // Sprint completion > 90%
+  const jira = content.integrationData?.jira;
+  if (jira?.issues?.total > 0) {
+    const completionRate = pct(n(jira.issues.completed), n(jira.issues.total));
+    if (completionRate >= 90) {
+      wins.push(`Sprint completion hit <strong>${completionRate}%</strong>. The team is executing at a high level.`);
+    }
+  }
+
+  // No overdue tickets
+  if (jira?.issues?.overdue && jira.issues.overdue.length === 0 && jira.issues?.total > 0) {
+    wins.push(`Zero overdue tickets. Every commitment is being met on schedule.`);
+  }
+
+  if (wins.length === 0) return [];
+
+  return [{
+    color: "green",
+    label: "Win of the week",
+    sources: [],
+    headline: wins.length === 1
+      ? `Something worth celebrating this period.`
+      : `${wins.length} things worth celebrating this period.`,
+    body: wins.join("<br>"),
   }];
 }
 
@@ -235,7 +301,7 @@ function discoverSprintRisk(content: Record<string, any>): Discovery[] {
       sources: ["jira", "github"],
       headline: predictedRate < 80
         ? `${sprint.name} has a ${missProb}% chance of missing its target. ${remaining} issues remain with ${daysLeft} days left.`
-        : `${sprint.name} is tracking at ${predictedRate}% predicted completion — ${remaining} issues remain.`,
+        : `${sprint.name} is tracking at ${predictedRate}% predicted completion with ${remaining} issues remaining.`,
       body: `<strong>${sprint.name}</strong>${sprint.goal ? ` ("${esc(sprint.goal)}")` : ""} has <strong>${sprint.completedIssues}/${sprint.totalIssues} issues completed</strong> with ${daysLeft} days remaining. ` +
         `Based on trailing velocity of <strong>${fmt(forecast.avgIssuesPerSprint)} issues/sprint</strong> (${forecast.confidence} confidence), ` +
         `we predict <strong>${forecast.predictedCompletion} of ${forecast.currentSprintPlanned}</strong> issues will be completed.` +
@@ -258,7 +324,7 @@ function discoverSprintRisk(content: Record<string, any>): Discovery[] {
       label: "Carry-over risk",
       sources: ["jira"],
       headline: `${carryOver.carryOverCount} issue${carryOver.carryOverCount > 1 ? "s are" : " is"} likely carrying over from the previous sprint.`,
-      body: `These issues are still in "To Do" status late in the sprint — historically, tickets in this state at this point carry over <strong>78% of the time</strong>. Each carry-over delays dependent work and reduces sprint predictability.`,
+      body: `These issues are still in "To Do" status late in the sprint. Historically, tickets in this state at this point carry over <strong>78% of the time</strong>. Each carry-over delays dependent work and reduces sprint predictability.`,
       personRows: issues.slice(0, 5).map((i: { key: string; summary: string; assignee: string }) => ({
         initials: i.assignee.split(" ").map((w: string) => w[0]).join("").slice(0, 2),
         name: `${i.key}: ${i.summary}`,
@@ -281,7 +347,7 @@ function discoverSprintRisk(content: Record<string, any>): Discovery[] {
       color: avgRate >= 85 ? "green" : avgRate >= 70 ? "blue" : "amber",
       label: "Sprint velocity trend",
       sources: ["jira"],
-      headline: `Sprint completion has been ${trend} — averaging ${avgRate}% across the last ${sprints.length} sprints.`,
+      headline: `Sprint completion has been ${trend}, averaging ${avgRate}% across the last ${sprints.length} sprints.`,
       body: sprints.map((s: { name: string; completedIssues: number; totalIssues: number; completionRate: number }) =>
         `<strong>${esc(s.name)}</strong>: ${s.completedIssues}/${s.totalIssues} issues (${s.completionRate}%)`
       ).join(" · "),
@@ -306,8 +372,8 @@ function discoverOverdueTickets(content: Record<string, any>): Discovery[] {
     color: "red",
     label: "Attention needed",
     sources: ["jira"],
-    headline: `${overdue.length} ticket${overdue.length > 1 ? "s are" : " is"} overdue — the oldest by ${overdue[0].daysOverdue} days.`,
-    body: `These tickets have passed their due dates and are blocking downstream work. Overdue tickets that aren't addressed within 2 weeks have a <strong>3x higher probability</strong> of being deprioritized without resolution — creating invisible tech debt.`,
+    headline: `${overdue.length} ticket${overdue.length > 1 ? "s are" : " is"} overdue. The oldest is ${overdue[0].daysOverdue} days past due.`,
+    body: `These tickets have passed their due dates and are blocking downstream work. Overdue tickets that aren't addressed within 2 weeks have a <strong>3x higher probability</strong> of being deprioritized without resolution, creating invisible tech debt.`,
     personRows: overdue.slice(0, 5).map((o: { key: string; summary: string; assignee: string; daysOverdue: number }) => ({
       initials: o.assignee.split(" ").map((w: string) => w[0]).join("").slice(0, 2),
       name: `${o.key}: ${o.summary}`,
@@ -343,7 +409,7 @@ function discoverStalePRs(content: Record<string, any>): Discovery[] {
       const topPct = pct(n(sorted[0][1]), totalReviews);
       const assignedToTop = stalePrs.filter((pr: { author: string }) => pr.author === topReviewer).length;
       if (assignedToTop > 0 && topPct >= 20) {
-        reviewerNote = ` <strong>${assignedToTop} of ${stalePrs.length} stale PRs involve ${esc(topReviewer)} who handles ${topPct}% of all reviews</strong> — consider redistributing review load.`;
+        reviewerNote = ` <strong>${assignedToTop} of ${stalePrs.length} stale PRs involve ${esc(topReviewer)} who handles ${topPct}% of all reviews.</strong> Consider redistributing review load.`;
       }
     }
   }
@@ -358,7 +424,7 @@ function discoverStalePRs(content: Record<string, any>): Discovery[] {
     color: stalePrs.length >= 3 ? "red" : "amber",
     label: "PR aging radar",
     sources: ["github"],
-    headline: `${stalePrs.length} PR${stalePrs.length > 1 ? "s have" : " has"} been open ${oldest.daysOpen}+ days — ${totalStuckLOC.toLocaleString()} lines of code are waiting to ship.`,
+    headline: `${stalePrs.length} PR${stalePrs.length > 1 ? "s have" : " has"} been open ${oldest.daysOpen}+ days. ${totalStuckLOC.toLocaleString()} lines of code are waiting to ship.`,
     body: `Stale PRs accumulate merge conflicts, increase context-switching costs, and delay feature delivery. PRs open longer than 7 days are <strong>4x more likely to be abandoned</strong> than merged.` +
       reviewerNote,
     bigNum: { value: totalStuckLOC.toLocaleString(), label: "Lines of code stuck in review" },
@@ -416,6 +482,9 @@ function discoverCodeChurn(content: Record<string, any>): Discovery[] {
   const churn = content.codeChurn;
   if (!churn) return [];
 
+  // Skip if all values are zero — nothing meaningful to show
+  if (n(churn.totalAdditions) === 0 && n(churn.totalDeletions) === 0 && n(churn.netLinesAdded) === 0) return [];
+
   const net = n(churn.netLinesAdded);
   const ratio = n(churn.churnRatio);
   const largePrs = churn.largePrs || [];
@@ -427,13 +496,13 @@ function discoverCodeChurn(content: Record<string, any>): Discovery[] {
     label: "Code churn analysis",
     sources: ["github"],
     headline: ratio > 0.7
-      ? `High code churn detected — ${fmt(ratio * 100)}% of code added this period was also deleted. Net: ${net > 0 ? "+" : ""}${net.toLocaleString()} LOC.`
+      ? `High code churn detected. ${fmt(ratio * 100)}% of code added this period was also deleted. Net: ${net > 0 ? "+" : ""}${net.toLocaleString()} LOC.`
       : `Net code growth of ${net > 0 ? "+" : ""}${net.toLocaleString()} lines with a healthy churn ratio of ${fmt(ratio, 2)}.`,
     body: `The team added <strong>+${n(churn.totalAdditions).toLocaleString()}</strong> and removed <strong>-${n(churn.totalDeletions).toLocaleString()}</strong> lines of code. ` +
       `Average PR size is <strong>${n(churn.avgPrSize).toLocaleString()} LOC</strong>. ` +
       (largePrs.length > 0
-        ? `<strong>${largePrs.length} PR${largePrs.length > 1 ? "s" : ""} exceeded 500 lines</strong> — large PRs take 2-3x longer to review and are more likely to introduce defects.`
-        : `No PRs exceeded 500 lines — the team is shipping right-sized changes.`) +
+        ? `<strong>${largePrs.length} PR${largePrs.length > 1 ? "s" : ""} exceeded 500 lines.</strong> Large PRs take 2-3x longer to review and are more likely to introduce defects.`
+        : `No PRs exceeded 500 lines. The team is shipping right-sized changes.`) +
       (ratio > 0.7 ? ` A churn ratio above 0.7 may indicate rework, frequent reverts, or rapidly changing requirements.` : ""),
     dataGrid: [
       { value: `+${n(churn.totalAdditions).toLocaleString()}`, label: "Lines added", color: "green" },
@@ -504,9 +573,9 @@ function discoverMeetingCost(content: Record<string, any>): Discovery[] {
   if (gh?.reviews?.avgTurnaroundTimeHours && focusHours > 0) {
     const reviewTurnaround = n(gh.reviews.avgTurnaroundTimeHours);
     if (focusHours < 3 && reviewTurnaround > 12) {
-      crossSourceNote = ` <strong>Low focus time (${fmt(focusHours)}h/day) may be contributing to slower review turnaround (${fmt(reviewTurnaround)}h)</strong> — less uninterrupted time means reviews sit in queue longer.`;
+      crossSourceNote = ` <strong>Low focus time (${fmt(focusHours)}h/day) may be contributing to slower review turnaround (${fmt(reviewTurnaround)}h).</strong> Less uninterrupted time means reviews sit in queue longer.`;
     } else if (focusHours >= 3.5 && reviewTurnaround < 12) {
-      crossSourceNote = ` Higher focus time correlates with faster reviews — your ${fmt(reviewTurnaround)}h turnaround benefits from ${fmt(focusHours)}h/day of uninterrupted work.`;
+      crossSourceNote = ` Higher focus time correlates with faster reviews. Your ${fmt(reviewTurnaround)}h turnaround benefits from ${fmt(focusHours)}h/day of uninterrupted work.`;
     }
   }
 
@@ -518,8 +587,8 @@ function discoverMeetingCost(content: Record<string, any>): Discovery[] {
       ? `Engineers average only ${fmt(focusHours)}h/day of focus time. ${recurringPct}% of ${fmt(totalHours)}h in meetings are recurring.`
       : `Team averages ${fmt(focusHours)}h/day of focus time. ${fmt(recurringHours)}h in recurring meetings, ${fmt(oneOffHours)}h in one-offs.`,
     body: (cost > 0 ? `At $150/hr engineering cost, recurring meetings alone cost <strong>$${recurringCost.toLocaleString()}</strong>, one-off meetings cost <strong>$${oneOffCost.toLocaleString()}</strong>. ` : "") +
-      (recurringPct > 40 ? `<strong>If you cancelled ${reclaimPct}% of recurring meetings, you'd reclaim ~${reclaimedWeekly}h this period — approximately ${reclaimedQuarterly} engineering hours per quarter.</strong> ` : "") +
-      (focusHours < 3 ? `Focus time below 3h/day severely impacts ability to do deep technical work.` : focusHours < 4 ? `Focus time is below the recommended 4h/day threshold. Consider protecting morning blocks for deep work.` : `Focus time is healthy — the team has sufficient bandwidth for deep technical work.`) +
+      (recurringPct > 40 ? `<strong>If you cancelled ${reclaimPct}% of recurring meetings, you'd reclaim ~${reclaimedWeekly}h this period, roughly ${reclaimedQuarterly} engineering hours per quarter.</strong> ` : "") +
+      (focusHours < 3 ? `Focus time below 3h/day severely impacts ability to do deep technical work.` : focusHours < 4 ? `Focus time is below the recommended 4h/day threshold. Consider protecting morning blocks for deep work.` : `Focus time is healthy. The team has sufficient bandwidth for deep technical work.`) +
       crossSourceNote,
     bigNum: cost > 0 ? { value: `$${Math.round(cost / 1000)}K`, label: `Total meeting cost · ${fmt(recurringHours)}h recurring + ${fmt(oneOffHours)}h one-off` } : undefined,
     dataGrid: [
@@ -588,10 +657,10 @@ function discoverDeliverableProgress(content: Record<string, any>): Discovery[] 
     color: overdue.length > 0 ? "amber" : avgCompletion >= 70 ? "green" : "blue",
     label: "Deliverable tracking",
     sources: ["jira"],
-    headline: `${active.length} active deliverable${active.length !== 1 ? "s" : ""} at ${avgCompletion}% average progress${overdue.length > 0 ? ` — ${overdue.length} overdue` : ""}.`,
+    headline: `${active.length} active deliverable${active.length !== 1 ? "s" : ""} at ${avgCompletion}% average progress${overdue.length > 0 ? `, ${overdue.length} overdue` : ""}.`,
     body: deliverables.slice(0, 6).map((d: { key: string; summary: string; completionPct: number; status: string; assignee: string; dueDate?: string; statusCategory: string }) => {
       const isOverdue = d.dueDate && new Date(d.dueDate) < new Date() && d.statusCategory !== "done";
-      return `<strong>${esc(d.key)}</strong>: ${esc(d.summary)} — ${d.completionPct}% (${esc(d.status)})${isOverdue ? " <strong style='color:var(--red)'>OVERDUE</strong>" : ""}`;
+      return `<strong>${esc(d.key)}</strong>: ${esc(d.summary)}, ${d.completionPct}% (${esc(d.status)})${isOverdue ? " <strong style='color:var(--red)'>OVERDUE</strong>" : ""}`;
     }).join("<br>"),
     personRows: active.slice(0, 5).map((d: { key: string; summary: string; assignee: string; completionPct: number; dueDate?: string; statusCategory: string }) => {
       const isOverdue = d.dueDate && new Date(d.dueDate) < new Date() && d.statusCategory !== "done";
@@ -610,6 +679,12 @@ function discoverDeliverableProgress(content: Record<string, any>): Discovery[] 
 function discoverBenchmarks(content: Record<string, any>): Discovery[] {
   const benchmarks = content.benchmarks;
   if (!benchmarks?.comparisons?.length) return [];
+
+  // Filter out comparisons where the current value is 0 (no real data)
+  benchmarks.comparisons = benchmarks.comparisons.filter(
+    (c: { currentValue: number }) => n(c.currentValue) > 0
+  );
+  if (benchmarks.comparisons.length === 0) return [];
 
   const above = benchmarks.comparisons.filter((c: { performance: string }) => c.performance === "above");
   const below = benchmarks.comparisons.filter((c: { performance: string }) => c.performance === "below");
@@ -637,6 +712,9 @@ function discoverProgression(content: Record<string, any>): Discovery[] {
 
   const improved = (progression.metrics || []).filter((m: { direction: string }) => m.direction === "improved");
 
+  // Skip if there are no actual improvements to report — "being tracked" filler isn't useful
+  if (improved.length === 0 && n(progression.estimatedCostSavings) === 0) return [];
+
   const grid: { value: string; label: string; color?: string }[] = [
     { value: `${progression.reportCount}`, label: "Reports generated" },
     { value: `${progression.weeksTracked}`, label: "Weeks tracked" },
@@ -654,7 +732,7 @@ function discoverProgression(content: Record<string, any>): Discovery[] {
     sources: [],
     headline: `Over ${progression.reportCount} reports and ${progression.weeksTracked} weeks, ` +
       (improved.length > 0
-        ? `${improved.length} key metric${improved.length > 1 ? "s have" : " has"} improved${progression.estimatedCostSavings > 0 ? ` — saving an estimated $${Math.round(progression.estimatedCostSavings).toLocaleString()}` : ""}.`
+        ? `${improved.length} key metric${improved.length > 1 ? "s have" : " has"} improved${progression.estimatedCostSavings > 0 ? `, saving an estimated $${Math.round(progression.estimatedCostSavings).toLocaleString()}` : ""}.`
         : `NexFlow has been tracking your engineering health.`),
     body: improved.length > 0
       ? `<strong>Key improvements since report #1:</strong><br>` +
@@ -726,10 +804,10 @@ function discoverSlackBlockers(content: Record<string, any>): Discovery[] {
     color: blockerList.length >= 5 ? "red" : "amber",
     label: blockerList.length >= 5 ? "Blockers detected" : "Blocker signals",
     sources: ticketCount > 0 ? ["slack", "jira"] : ["slack"],
-    headline: `${blockerList.length} blocker signal${blockerList.length > 1 ? "s" : ""} detected across ${n(blockers.channelsScanned)} Slack channels${ticketCount > 0 ? ` — referencing ${ticketCount} Jira ticket${ticketCount > 1 ? "s" : ""}` : ""}.`,
+    headline: `${blockerList.length} blocker signal${blockerList.length > 1 ? "s" : ""} detected across ${n(blockers.channelsScanned)} Slack channels${ticketCount > 0 ? `, referencing ${ticketCount} Jira ticket${ticketCount > 1 ? "s" : ""}` : ""}.`,
     body: `We scanned <strong>${n(blockers.totalMessagesScanned).toLocaleString()} messages</strong> and found ${blockerList.length} messages containing blocker language ("blocked by", "waiting on", "stuck on", etc.). ` +
-      (highConfidence.length > 0 ? `<strong>${highConfidence.length} are high-confidence</strong> — they reference known Jira tickets. ` : "") +
-      `Unresolved blockers compound daily — each blocked thread represents stalled work that may not be visible in your project tracker.`,
+      (highConfidence.length > 0 ? `<strong>${highConfidence.length} are high-confidence</strong> and reference known Jira tickets. ` : "") +
+      `Unresolved blockers compound daily. Each blocked thread represents stalled work that may not be visible in your project tracker.`,
     bigNum: { value: `${blockerList.length}`, label: `Blocker signals · ${n(blockers.channelsScanned)} channels scanned` },
     dataGrid: [
       { value: `${blockerList.length}`, label: "Blocker signals" },
@@ -768,7 +846,7 @@ function discoverResponseTime(content: Record<string, any>): Discovery[] {
       color: "amber",
       label: "Async lag detected",
       sources: ["slack"],
-      headline: `Average thread response time is ${avgResponseHrs >= 1 ? fmt(avgResponseHrs) + " hours" : fmt(avgResponseMin) + " minutes"} — async communication may be lagging.`,
+      headline: `Average thread response time is ${avgResponseHrs >= 1 ? fmt(avgResponseHrs) + " hours" : fmt(avgResponseMin) + " minutes"}. Async communication may be lagging.`,
       body: `When thread responses take over an hour on average, it creates invisible queues. Each slow response can block a decision or a code review by hours. ` +
         `Teams with sub-30-minute response times ship <strong>40% faster</strong> on average. ` +
         `Consider setting team norms around response windows for active threads, especially during core hours.`,
@@ -781,7 +859,7 @@ function discoverResponseTime(content: Record<string, any>): Discovery[] {
       color: "green",
       label: "Strong async culture",
       sources: ["slack"],
-      headline: `Team responds to threads in under ${Math.round(avgResponseMin)} minutes on average — strong async communication culture.`,
+      headline: `Team responds to threads in under ${Math.round(avgResponseMin)} minutes on average. That's a strong async communication culture.`,
       body: `Fast thread response times indicate the team is highly responsive and reduces invisible queuing time. ` +
         `The industry benchmark for high-performing teams is under 30 minutes. Your team is well under that threshold.`,
       bigNum: { value: `${Math.round(avgResponseMin)}m`, label: "Average thread response time" },
@@ -877,10 +955,10 @@ function discoverContributorRisk(content: Record<string, any>): Discovery[] {
     label: atRisk.length > 0 ? "Contributor risk detected" : "Workload distribution",
     sources: totalReviews > 0 && sl ? ["github", "slack", "jira"] : ["github", "jira"],
     headline: atRisk.length > 0
-      ? `${atRisk.length} contributor${atRisk.length > 1 ? "s show" : " shows"} burnout risk signals — high output combined with concentrated review load${afterHoursPct >= 20 ? " and after-hours activity" : ""}.`
+      ? `${atRisk.length} contributor${atRisk.length > 1 ? "s show" : " shows"} burnout risk signals: high output combined with concentrated review load${afterHoursPct >= 20 ? " and after-hours activity" : ""}.`
       : `${watching.length} contributor${watching.length > 1 ? "s" : ""} worth monitoring for workload balance.`,
     body: `This analysis combines commit volume, review load, ticket completion, and Slack after-hours activity to identify contributors who may be overloaded or disengaged. ` +
-      (atRisk.length > 0 ? `<strong>Contributors flagged "AT RISK" carry disproportionate load — losing them would create critical knowledge gaps.</strong> ` : "") +
+      (atRisk.length > 0 ? `<strong>Contributors flagged "AT RISK" carry disproportionate load. Losing them would create critical knowledge gaps.</strong> ` : "") +
       (watching.length > 0 ? `Contributors flagged "WATCH" show early signals worth monitoring.` : ""),
     dataGrid: [
       { value: `${atRisk.length}`, label: "At risk", color: atRisk.length > 0 ? "red" : undefined },
@@ -923,7 +1001,7 @@ function discoverContributorHighlights(content: Record<string, any>): Discovery[
       color: "green",
       label: "Top contributor",
       sources: ["github"],
-      headline: `${esc(topAuthor[0])} drove ${topPct}% of all commits this period — ${topAuthor[1]} commits and ${topPrs} PRs.`,
+      headline: `${esc(topAuthor[0])} drove ${topPct}% of all commits this period: ${topAuthor[1]} commits and ${topPrs} PRs.`,
       body: `The team shipped <strong>${totalCommits} total commits</strong> and merged <strong>${totalPrs} PRs</strong>. ` +
         `Here's how the contribution breaks down:`,
       dataGrid: sorted.slice(0, 4).map(([name, count]) => ({
@@ -934,6 +1012,139 @@ function discoverContributorHighlights(content: Record<string, any>): Discovery[
   }
 
   return discoveries;
+}
+
+// GitHub overview — always generates useful cards for any GitHub data, even solo devs
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function discoverGitHubOverview(content: Record<string, any>): Discovery[] {
+  const gh = content.integrationData?.github;
+  if (!gh) return [];
+
+  const discoveries: Discovery[] = [];
+  const totalCommits = n(gh.commits?.total);
+  const repos = gh.repositories || {};
+  const activeRepos = n(repos.active);
+  const totalRepos = n(repos.total);
+  const pr = typeof gh.pullRequests === "object" ? gh.pullRequests : {};
+  const merged = n(pr.merged);
+  const opened = n(pr.opened);
+  const reviewTotal = n(gh.reviews?.total);
+  const byAuthor = (gh.commits?.byAuthor || {}) as Record<string, number>;
+  const authorCount = Object.keys(byAuthor).length;
+
+  // Solo dev / tiny team insights — business-focused for non-technical founders
+  if (authorCount <= 1 && totalCommits > 0) {
+    const soloName = Object.keys(byAuthor)[0] || "the sole contributor";
+
+    // Get repo names for context
+    const repoNames = (gh.repos || []) as string[];
+    const shortRepoNames = repoNames.map((r: string) => r.split("/").pop() || r);
+
+    // No change tracking = no visibility into what's shipping
+    if (n(gh.issues?.total) === 0) {
+      discoveries.push({
+        color: "red",
+        label: "No paper trail",
+        sources: ["github"],
+        headline: `${totalCommits} changes shipped with zero documentation of what was built or why. If a client asks "what did we ship this quarter?", there's no answer on file.`,
+        body: `There are <strong>no issues, tickets, or project tracking</strong> connected to any of the ${totalCommits} commits across ` +
+          `<strong>${shortRepoNames.join("</strong> and <strong>")}</strong>. ` +
+          `This means no record of what features were prioritized, what bugs were fixed, or what decisions were made. ` +
+          `For investor updates, client demos, or onboarding a contractor, you'd be starting from memory. ` +
+          `<strong>We'll set up a lightweight tracking system on our next call that takes 2 minutes per feature, not 20.</strong>`,
+        bigNum: { value: "None", label: "No tracked features or decisions. Everything lives in someone's head." },
+        dataGrid: [
+          { value: `${totalCommits}`, label: "Changes shipped" },
+          { value: "0", label: "Documented decisions", color: "red" },
+        ],
+      });
+    }
+
+    // No PR / no review = no safety net + impossible to audit
+    if (merged === 0 && opened === 0) {
+      discoveries.push({
+        color: "amber",
+        label: "No safety net",
+        sources: ["github"],
+        headline: `Every change goes live instantly with no checkpoint. One bad update could take your product down with no easy way to undo it.`,
+        body: `Right now, code goes from "written" to "live" in one step with no review, no staging, and no rollback plan. ` +
+          `This matters because <strong>a single mistake can break your product for every user</strong>, ` +
+          `and without change history, debugging takes 5-10x longer. ` +
+          `The fix isn't about process overhead. It's a <strong>simple GitHub setting that creates an undo button for every change</strong>. ` +
+          `<strong>We'll configure this together on the next call. Genuinely 10 minutes.</strong>`,
+        bigNum: { value: "None", label: "No safety checkpoints between code and production" },
+      });
+    }
+
+    // Two separate repos — architecture question
+    if (shortRepoNames.length >= 2) {
+      discoveries.push({
+        color: "blue",
+        label: "Architecture check",
+        sources: ["github"],
+        headline: `You're running ${shortRepoNames.length} separate codebases. Are they talking to each other the way they should be?`,
+        body: `Your development is split across <strong>${shortRepoNames.join("</strong> and <strong>")}</strong>. ` +
+          `The question worth asking: are these truly independent products, or are they pieces of the same thing? ` +
+          `Keeping related code in separate repos adds coordination overhead. Updates in one might silently break the other. ` +
+          `<strong>On our next call, we'll map out your architecture and recommend whether to consolidate or keep them separate.</strong>`,
+        dataGrid: shortRepoNames.map((name: string) => ({
+          value: name,
+          label: "Repository",
+        })),
+      });
+    }
+  }
+
+  // Commit velocity insight (works for any team size with commits)
+  if (totalCommits > 0 && authorCount > 1) {
+    const commitsPerWeek = totalCommits / 13; // ~90-day period
+    discoveries.push({
+      color: commitsPerWeek >= 5 ? "green" : commitsPerWeek >= 2 ? "blue" : "amber",
+      label: "Development velocity",
+      sources: ["github"],
+      headline: `Team shipped ${totalCommits} commits across ${activeRepos} active ${activeRepos === 1 ? "repo" : "repos"}, averaging ${fmt(commitsPerWeek)} commits/week.`,
+      body: `Your codebase spans ${totalRepos} ${totalRepos === 1 ? "repository" : "repositories"} with ${authorCount} active ${authorCount === 1 ? "contributor" : "contributors"}. ` +
+        (merged > 0 ? `${merged} PRs were merged with an average merge time of ${fmt(n(pr.avgMergeTimeHours))}h. ` : "") +
+        (reviewTotal > 0 ? `${reviewTotal} code reviews were completed. ` : ""),
+      dataGrid: [
+        { value: `${totalCommits}`, label: "Commits" },
+        { value: `${activeRepos}`, label: "Active repos" },
+        { value: `${authorCount}`, label: "Contributors" },
+        ...(merged > 0 ? [{ value: `${merged}`, label: "PRs merged" }] : []),
+      ],
+    });
+  }
+
+  return discoveries;
+}
+
+// Upsell card: shows what connecting more tools would unlock
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function discoverConnectMore(content: Record<string, any>): Discovery[] {
+  const connected = (content.connectedSources || []) as string[];
+  const allSources = ["GITHUB", "JIRA", "LINEAR", "SLACK", "GOOGLE_CALENDAR"];
+  const missing = allSources.filter(s => !connected.includes(s));
+
+  // Only show if significantly limited — at least 2 sources missing
+  if (missing.length < 2) return [];
+
+  const unlocks: string[] = [];
+  if (missing.includes("SLACK")) unlocks.push("how your team actually communicates: where bottlenecks form, who's overloaded, and whether work discussions are happening in the right channels");
+  if (missing.includes("JIRA") || missing.includes("LINEAR")) unlocks.push("what's actually getting done vs what's planned: missed deadlines, scope creep, and where projects get stuck");
+  if (missing.includes("GOOGLE_CALENDAR")) unlocks.push("how much time goes to meetings vs actual building. Most teams are shocked to learn they spend 40-60% of their week in calls");
+
+  return [{
+    color: "purple",
+    label: "We can see more",
+    sources: [],
+    headline: `This brief is based on ${connected.length} data source. With ${missing.length} more connected, we can answer much bigger questions about your business.`,
+    body: `Right now we can see <em>what</em> got built, but not <em>how</em> or <em>why</em>. With more integrations, we can tell you: <strong>${unlocks.join("</strong>. Also: <strong>")}</strong>. ` +
+      `<strong>Connecting takes about 2 clicks each. We'll do it together on the next call.</strong>`,
+    dataGrid: [
+      { value: `${connected.length}`, label: "Connected", color: "green" },
+      { value: `${missing.length}`, label: "Available", color: "purple" },
+    ],
+  }];
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -994,11 +1205,11 @@ function discoverPriorActions(content: Record<string, any>): Discovery[] {
       : `${partial > 0 ? `${partial} recommendation${partial > 1 ? "s" : ""} partially addressed` : "No recommendations fully addressed yet"}, ${unchanged} unchanged.`,
     body: items.map((a) => {
       if (a.addressed && !a.partiallyAddressed) {
-        return `<span style="color:var(--green)">&#10003;</span> <strong>[${esc(a.priority)}] ${esc(a.title)}</strong> — <span style="color:var(--green)">Done:</span> ${a.deltaText}`;
+        return `<span style="color:var(--green)">&#10003;</span> <strong>[${esc(a.priority)}] ${esc(a.title)}</strong> · <span style="color:var(--green)">Done:</span> ${a.deltaText}`;
       } else if (a.partiallyAddressed) {
-        return `<span style="color:var(--amber)">&#9679;</span> <strong>[${esc(a.priority)}] ${esc(a.title)}</strong> — <span style="color:var(--amber)">Partially:</span> ${a.deltaText}`;
+        return `<span style="color:var(--amber)">&#9679;</span> <strong>[${esc(a.priority)}] ${esc(a.title)}</strong> · <span style="color:var(--amber)">Partially:</span> ${a.deltaText}`;
       } else {
-        return `<span style="color:var(--muted)">&#9675;</span> <strong>[${esc(a.priority)}] ${esc(a.title)}</strong> — <span style="color:var(--muted)">No change detected</span>`;
+        return `<span style="color:var(--muted)">&#9675;</span> <strong>[${esc(a.priority)}] ${esc(a.title)}</strong> · <span style="color:var(--muted)">No change detected</span>`;
       }
     }).join("<br>"),
     dataGrid: [
@@ -1033,16 +1244,24 @@ function extractCurrentMetrics(content: Record<string, any>): Record<string, num
 function renderActionItems(actionItems: any[]): string {
   if (!actionItems?.length) return "";
 
-  let html = `<div class="disc-label">Recommended actions</div>`;
-  html += `<div style="margin-bottom:32px">`;
-  for (const item of actionItems.slice(0, 8)) {
+  let html = "";
+  for (const item of actionItems.slice(0, 6)) {
     const priClass = item.priority === "P1" ? "p1" : item.priority === "P2" ? "p2" : "p3";
-    html += `<div class="action">
-      <div class="action-priority ${priClass}">${esc(item.priority)}</div>
-      <div class="action-text"><strong>${esc(item.title)}</strong> — ${esc(item.description)}${item.suggestedOwner ? ` <span style="color:var(--muted);font-size:12px">(Owner: ${esc(item.suggestedOwner)})</span>` : ""}</div>
+    const urgency = item.priority === "P1" ? "Do this week" : item.priority === "P2" ? "Do this sprint" : "When you can";
+    html += `<div class="action ${priClass}">
+      <div class="action-top">
+        <div class="action-priority ${priClass}">${esc(item.priority)}</div>
+        <div class="action-urgency">${urgency}</div>
+      </div>
+      <div class="action-title">${esc(item.title)}</div>
+      <div class="action-desc">${esc(item.description)}</div>
+      <div class="action-footer">
+        ${item.suggestedOwner ? `<div class="action-meta-tag">Owner: ${esc(item.suggestedOwner)}</div>` : ""}
+        ${item.timeEstimate ? `<div class="action-meta-tag">${esc(item.timeEstimate)}</div>` : ""}
+        ${item.expectedImpact ? `<div class="action-roi">${esc(item.expectedImpact)}</div>` : ""}
+      </div>
     </div>`;
   }
-  html += `</div>`;
   return html;
 }
 
@@ -1075,7 +1294,7 @@ export function renderNarrative(text: string): string {
 
     const actionMatch = trimmed.match(/^(\d+)\.\s+\*\*(.+?)\*\*\s*[—–-]\s*(.+)/);
     if (actionMatch) {
-      html += `<div class="narrative-action"><span class="narrative-action-num">${actionMatch[1]}</span><strong>${esc(actionMatch[2])}</strong> — ${formatInline(actionMatch[3])}</div>`;
+      html += `<div class="narrative-action"><span class="narrative-action-num">${actionMatch[1]}</span><strong>${esc(actionMatch[2])}</strong>: ${formatInline(actionMatch[3])}</div>`;
       continue;
     }
 
@@ -1113,15 +1332,40 @@ function buildWeekStats(content: Record<string, any>, healthScore: HealthScore |
     });
   }
 
+  if (gh?.commits) {
+    const totalCommits = n(gh.commits.total);
+    const priorCommits = prior?.totalCommits;
+    if (totalCommits > 0) {
+      stats.push({
+        value: `${totalCommits}`,
+        label: "Commits",
+        delta: priorCommits != null ? `${totalCommits > priorCommits ? "↑" : totalCommits < priorCommits ? "↓" : ""} ${Math.abs(totalCommits - priorCommits)} vs prior` : "",
+        direction: priorCommits != null ? (totalCommits > priorCommits ? "up" : totalCommits < priorCommits ? "down" : "flat") : "flat",
+      });
+    }
+
+    const authorCount = Object.keys(gh.commits.byAuthor || {}).length;
+    if (authorCount > 0) {
+      stats.push({
+        value: `${authorCount}`,
+        label: "Contributors",
+        delta: "",
+        direction: "flat",
+      });
+    }
+  }
+
   if (gh?.pullRequests) {
     const merged = n(gh.pullRequests.merged);
     const priorMerged = prior?.prsMerged;
-    stats.push({
-      value: `${merged}`,
-      label: "PRs Merged",
-      delta: priorMerged != null ? `${merged > priorMerged ? "↑" : "↓"} ${Math.abs(merged - priorMerged)} vs prior` : "",
-      direction: priorMerged != null ? (merged > priorMerged ? "up" : merged < priorMerged ? "down" : "flat") : "flat",
-    });
+    if (merged > 0) {
+      stats.push({
+        value: `${merged}`,
+        label: "PRs Merged",
+        delta: priorMerged != null ? `${merged > priorMerged ? "↑" : "↓"} ${Math.abs(merged - priorMerged)} vs prior` : "",
+        direction: priorMerged != null ? (merged > priorMerged ? "up" : merged < priorMerged ? "down" : "flat") : "flat",
+      });
+    }
 
     const mergeTime = n(gh.pullRequests.avgMergeTimeHours);
     const priorMerge = prior?.avgPrMergeTimeHours;
@@ -1176,166 +1420,286 @@ const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
   :root {
     --bg: #ffffff;
-    --fg: #0a0a0a;
-    --muted: #6b7280;
-    --border: #e5e7eb;
-    --surface: #f9fafb;
-    --blue: #2563eb;
-    --blue-bg: #eff6ff;
-    --amber: #d97706;
-    --amber-bg: #fffbeb;
-    --red: #dc2626;
-    --red-bg: #fef2f2;
-    --green: #16a34a;
-    --green-bg: #f0fdf4;
-    --purple: #7c3aed;
-    --purple-bg: #f5f3ff;
+    --fg: #0f0f0f;
+    --fg2: #3a3a3a;
+    --muted: #8c8c8c;
+    --border: #e5e5ea;
+    --surface: #f7f7f8;
+    --accent: #0f0f0f;
+    --red: #e5484d;
+    --amber: #e5940c;
+    --green: #30a46c;
+    --blue: #3b82f6;
+    --purple: #8b5cf6;
+    --red-bg: #fff0f0;
+    --amber-bg: #fef6e7;
+    --green-bg: #ebfaf1;
+    --blue-bg: #eef4ff;
+    --purple-bg: #f3f0ff;
+    --radius: 14px;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Inter', -apple-system, sans-serif; background: var(--surface); color: var(--fg); line-height: 1.6; }
-  .page { max-width: 820px; margin: 0 auto; background: var(--bg); }
+  body { font-family: 'Inter', -apple-system, sans-serif; background: #eeeef0; color: var(--fg); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  .page { max-width: 660px; margin: 0 auto; background: var(--bg); border-radius: 16px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.04); }
 
   /* ── Header ── */
-  .header { padding: 48px 48px 40px; border-bottom: 1px solid var(--border); }
-  .header-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; }
-  .brand { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: var(--muted); }
-  .tag { display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; padding: 3px 10px; border-radius: 4px; background: var(--purple-bg); color: var(--purple); margin-left: 12px; }
-  .period { font-size: 12px; color: var(--muted); }
-  .header h1 { font-size: 28px; font-weight: 900; line-height: 1.15; letter-spacing: -0.5px; margin-bottom: 12px; }
-  .header h1 span { color: var(--blue); }
-  .header-sub { font-size: 15px; color: var(--muted); line-height: 1.55; max-width: 650px; }
-  .sources { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
-  .source-pill { font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border); color: var(--muted); }
+  .header { padding: 44px 44px 32px; background: linear-gradient(135deg, #fafafa 0%, #f0f0f2 100%); border-bottom: 1px solid var(--border); position: relative; }
+  .header::after { content: ''; position: absolute; bottom: 0; left: 44px; right: 44px; height: 3px; background: linear-gradient(90deg, var(--fg) 0%, var(--blue) 50%, var(--purple) 100%); border-radius: 3px 3px 0 0; }
+  .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .brand { font-size: 10px; font-weight: 700; letter-spacing: 2.5px; color: var(--muted); text-transform: uppercase; }
+  .tag { font-size: 10px; font-weight: 700; padding: 4px 12px; border-radius: 6px; background: var(--fg); color: white; margin-left: 10px; letter-spacing: 0.3px; }
+  .period { font-size: 11px; color: var(--muted); font-weight: 500; }
+  .header-company { font-size: 32px; font-weight: 900; letter-spacing: -1px; color: var(--fg); margin-bottom: 6px; line-height: 1.1; }
+  .header-subtitle { font-size: 14px; color: var(--fg2); font-weight: 500; }
+  .header-subtitle strong { color: var(--fg); font-weight: 700; }
+  .sources { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 16px; }
+  .source-pill { font-size: 10px; font-weight: 600; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border); color: var(--muted); background: white; }
   .source-pill.active { border-color: var(--green); color: var(--green); background: var(--green-bg); }
 
-  /* ── Week bar ── */
-  .week-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0; margin: 0 48px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-  .week-stat { padding: 20px; text-align: center; border-right: 1px solid var(--border); }
+  /* ── Health strip ── */
+  .health-strip { display: flex; align-items: center; gap: 20px; padding: 20px 44px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .health-score-big { font-size: 44px; font-weight: 900; letter-spacing: -2px; line-height: 1; }
+  .health-meta { display: flex; flex-direction: column; gap: 2px; }
+  .health-meta .grade-line { font-size: 13px; font-weight: 700; color: var(--fg); }
+  .health-meta .delta-line { font-size: 11px; font-weight: 600; }
+  .health-dims { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; justify-content: flex-end; }
+  .health-dim { font-size: 10px; padding: 4px 10px; border-radius: 6px; background: white; color: var(--muted); font-weight: 600; border: 1px solid var(--border); }
+  .health-dim .dim-score { font-weight: 800; margin-right: 3px; }
+
+  /* ── Week stats ── */
+  .week-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); border-bottom: 1px solid var(--border); }
+  .week-stat { padding: 18px 12px; text-align: center; border-right: 1px solid var(--border); }
   .week-stat:last-child { border-right: none; }
-  .week-stat .val { font-size: 28px; font-weight: 900; letter-spacing: -0.5px; }
-  .week-stat .label { font-size: 11px; color: var(--muted); font-weight: 500; margin-top: 4px; }
-  .week-stat .delta { font-size: 11px; font-weight: 700; margin-top: 4px; }
+  .week-stat .val { font-size: 24px; font-weight: 900; letter-spacing: -1px; color: var(--fg); }
+  .week-stat .label { font-size: 9px; color: var(--muted); font-weight: 700; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .week-stat .delta { font-size: 10px; font-weight: 600; margin-top: 3px; }
   .week-stat .delta.up { color: var(--green); }
   .week-stat .delta.down { color: var(--red); }
   .week-stat .delta.flat { color: var(--muted); }
 
-  /* ── Discoveries ── */
-  .discoveries { padding: 0 48px 48px; }
-  .disc-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: var(--muted); padding-top: 40px; margin-bottom: 28px; }
+  /* ── TLDR ── */
+  .tldr { padding: 28px 44px; background: linear-gradient(135deg, #fefce8 0%, #fff7ed 100%); border-bottom: 1px solid var(--border); }
+  .tldr-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; color: var(--amber); margin-bottom: 8px; }
+  .tldr-text { font-size: 15px; font-weight: 600; line-height: 1.55; color: var(--fg); }
+  .tldr-text strong { font-weight: 800; }
 
-  .discovery { margin-bottom: 32px; padding: 28px; border-radius: 12px; border: 1px solid var(--border); }
-  .discovery.blue { background: var(--blue-bg); border-color: #bfdbfe; }
-  .discovery.amber { background: var(--amber-bg); border-color: #fde68a; }
-  .discovery.red { background: var(--red-bg); border-color: #fecaca; }
-  .discovery.green { background: var(--green-bg); border-color: #bbf7d0; }
-  .discovery.purple { background: var(--purple-bg); border-color: #c4b5fd; }
-  .discovery.neutral { background: var(--surface); }
+  /* ── Overview ── */
+  .overview { padding: 32px 44px; }
+  .overview-title { font-size: 18px; font-weight: 800; letter-spacing: -0.5px; color: var(--fg); margin-bottom: 20px; }
+  .overview-list { display: flex; flex-direction: column; gap: 2px; }
+  .overview-item { display: flex; align-items: center; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+  .overview-item:last-child { border-bottom: none; }
+  .overview-num { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 900; flex-shrink: 0; }
+  .overview-num.red { background: var(--red-bg); color: var(--red); }
+  .overview-num.amber { background: var(--amber-bg); color: var(--amber); }
+  .overview-num.green { background: var(--green-bg); color: var(--green); }
+  .overview-num.blue { background: var(--blue-bg); color: var(--blue); }
+  .overview-num.purple { background: var(--purple-bg); color: var(--purple); }
+  .overview-num.neutral { background: var(--surface); color: var(--muted); }
+  .overview-content { flex: 1; min-width: 0; }
+  .overview-headline { font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--fg); }
+  .overview-sub { font-size: 11px; color: var(--muted); margin-top: 3px; font-weight: 500; }
+  .overview-pill { flex-shrink: 0; }
 
-  .disc-num { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 10px; }
-  .disc-num.blue { color: var(--blue); }
-  .disc-num.amber { color: var(--amber); }
-  .disc-num.red { color: var(--red); }
-  .disc-num.green { color: var(--green); }
-  .disc-num.purple { color: var(--purple); }
-  .disc-num.neutral { color: var(--muted); }
+  /* ── Separator ── */
+  .sep { height: 1px; background: var(--border); margin: 0 44px; }
 
-  .disc-headline { font-size: 19px; font-weight: 800; line-height: 1.25; margin-bottom: 14px; letter-spacing: -0.2px; }
-  .disc-body { font-size: 14px; color: #374151; line-height: 1.7; }
+  /* ── Finding cards ── */
+  .findings { padding: 32px 44px 12px; }
+  .findings-title { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 2.5px; color: var(--muted); margin-bottom: 24px; }
+
+  .finding-hero { margin-bottom: 16px; padding: 28px; border-radius: var(--radius); border: 1px solid var(--border); background: white; position: relative; overflow: hidden; }
+  .finding-hero::before { content: ''; position: absolute; top: 0; left: 0; bottom: 0; width: 4px; }
+  .finding-hero.red::before { background: var(--red); }
+  .finding-hero.amber::before { background: var(--amber); }
+  .finding-hero.green::before { background: var(--green); }
+  .finding-hero.blue::before { background: var(--blue); }
+  .finding-hero.purple::before { background: var(--purple); }
+  .finding-hero.neutral::before { background: var(--muted); }
+  .finding-hero .finding-badge { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .finding-hero .finding-num { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 900; flex-shrink: 0; }
+  .finding-hero .finding-num.red { background: var(--red-bg); color: var(--red); }
+  .finding-hero .finding-num.amber { background: var(--amber-bg); color: var(--amber); }
+  .finding-hero .finding-num.green { background: var(--green-bg); color: var(--green); }
+  .finding-hero .finding-num.blue { background: var(--blue-bg); color: var(--blue); }
+  .finding-hero .finding-num.purple { background: var(--purple-bg); color: var(--purple); }
+  .finding-hero .disc-headline { font-size: 18px; font-weight: 800; line-height: 1.3; letter-spacing: -0.3px; margin-bottom: 10px; }
+
+  .finding-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .finding-card { padding: 24px; border-radius: var(--radius); border: 1px solid var(--border); background: white; position: relative; overflow: hidden; }
+  .finding-card::before { content: ''; position: absolute; top: 0; left: 0; bottom: 0; width: 3px; }
+  .finding-card.red::before { background: var(--red); }
+  .finding-card.amber::before { background: var(--amber); }
+  .finding-card.green::before { background: var(--green); }
+  .finding-card.blue::before { background: var(--blue); }
+  .finding-card.purple::before { background: var(--purple); }
+  .finding-card.neutral::before { background: var(--muted); }
+  .finding-card .finding-badge { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .finding-card .finding-num { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 900; flex-shrink: 0; }
+  .finding-card .finding-num.red { background: var(--red-bg); color: var(--red); }
+  .finding-card .finding-num.amber { background: var(--amber-bg); color: var(--amber); }
+  .finding-card .finding-num.green { background: var(--green-bg); color: var(--green); }
+  .finding-card .finding-num.blue { background: var(--blue-bg); color: var(--blue); }
+  .finding-card .finding-num.purple { background: var(--purple-bg); color: var(--purple); }
+  .finding-card .disc-headline { font-size: 14px; font-weight: 700; }
+  .finding-card .big-num { font-size: 28px; }
+  .finding-full { grid-column: 1 / -1; }
+
+  /* ── Shared discovery internals ── */
+  .disc-headline { font-size: 16px; font-weight: 800; line-height: 1.35; margin-bottom: 8px; letter-spacing: -0.3px; color: var(--fg); }
+  .disc-body { font-size: 13px; color: var(--fg2); line-height: 1.7; }
   .disc-body strong { color: var(--fg); font-weight: 700; }
+  .disc-num { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; color: var(--muted); }
 
-  .source-tag { display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 3px; margin-right: 6px; margin-bottom: 8px; }
-  .source-tag.gh { background: #f0fdf4; color: #16a34a; }
-  .source-tag.jira { background: #eff6ff; color: #2563eb; }
-  .source-tag.slack { background: #faf5ff; color: #7c3aed; }
-  .source-tag.linear { background: #faf5ff; color: #7c3aed; }
-  .source-tag.cal { background: #fffbeb; color: #d97706; }
-  .source-tag.neutral { background: var(--surface); color: var(--muted); }
+  .risk-pill { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; letter-spacing: 0.3px; padding: 3px 10px; border-radius: 6px; }
+  .risk-pill.high { background: var(--red-bg); color: var(--red); }
+  .risk-pill.medium { background: var(--amber-bg); color: var(--amber); }
+  .risk-pill.low { background: var(--green-bg); color: var(--green); }
+  .risk-pill.info { background: var(--blue-bg); color: var(--blue); }
+  .risk-pill.win { background: var(--green-bg); color: var(--green); }
+  .risk-pill.insight { background: var(--purple-bg); color: var(--purple); }
 
-  .big-num { font-size: 48px; font-weight: 900; line-height: 1; margin-bottom: 8px; letter-spacing: -1px; }
-  .big-num.blue { color: var(--blue); }
-  .big-num.amber { color: var(--amber); }
+  .source-tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px; margin-right: 3px; margin-bottom: 4px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+
+  .big-num { font-size: 40px; font-weight: 900; line-height: 1; margin-bottom: 4px; letter-spacing: -1.5px; color: var(--fg); }
+  .big-num.text-value { font-size: 22px; letter-spacing: -0.5px; padding: 10px 18px; border-radius: 10px; display: inline-block; margin-bottom: 8px; }
+  .big-num.text-value.red { background: var(--red-bg); color: var(--red); }
+  .big-num.text-value.amber { background: var(--amber-bg); color: var(--amber); }
+  .big-num.text-value.green { background: var(--green-bg); color: var(--green); }
+  .big-num.text-value.blue { background: var(--blue-bg); color: var(--blue); }
+  .big-num.text-value.purple { background: var(--purple-bg); color: var(--purple); }
   .big-num.red { color: var(--red); }
+  .big-num.amber { color: var(--amber); }
   .big-num.green { color: var(--green); }
+  .big-num.blue { color: var(--blue); }
   .big-num.purple { color: var(--purple); }
-  .big-num.neutral { color: var(--muted); }
-  .big-label { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: 16px; }
+  .big-label { font-size: 11px; color: var(--muted); font-weight: 600; margin-bottom: 14px; letter-spacing: 0.2px; }
 
-  .data-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 20px; }
+  .data-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
   .data-grid.four { grid-template-columns: repeat(4, 1fr); }
-  .data-cell { padding: 14px; background: rgba(255,255,255,0.7); border-radius: 8px; }
-  .data-cell .val { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
-  .data-cell .label { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.3; }
+  .data-grid.two { grid-template-columns: repeat(2, 1fr); }
+  .data-cell { padding: 12px; background: var(--surface); border-radius: 8px; border: 1px solid var(--border); }
+  .data-cell .val { font-size: 16px; font-weight: 800; letter-spacing: -0.5px; color: var(--fg); }
+  .data-cell .label { font-size: 9px; color: var(--muted); margin-top: 2px; font-weight: 600; }
 
-  .person-row { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .person-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
   .person-row:last-child { border-bottom: none; }
-  .person-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--surface); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: var(--muted); flex-shrink: 0; border: 1px solid var(--border); }
+  .person-avatar { width: 28px; height: 28px; border-radius: 8px; background: var(--surface); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: var(--muted); flex-shrink: 0; border: 1px solid var(--border); }
   .person-info { flex: 1; min-width: 0; }
-  .person-name { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .person-detail { font-size: 13px; color: var(--muted); }
-  .person-badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 4px; flex-shrink: 0; }
-  .person-badge.green { background: var(--green-bg); color: var(--green); }
-  .person-badge.amber { background: var(--amber-bg); color: var(--amber); }
-  .person-badge.red { background: var(--red-bg); color: var(--red); }
-  .person-badge.blue { background: var(--blue-bg); color: var(--blue); }
-  .person-badge.purple { background: var(--purple-bg); color: var(--purple); }
-  .person-badge.neutral { background: var(--surface); color: var(--muted); }
+  .person-name { font-size: 12px; font-weight: 700; }
+  .person-detail { font-size: 11px; color: var(--muted); }
+  .person-badge { font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 6px; flex-shrink: 0; background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+  .person-badge.red { color: var(--red); border-color: var(--red); background: var(--red-bg); }
+  .person-badge.amber { color: var(--amber); border-color: var(--amber); background: var(--amber-bg); }
+  .person-badge.green { color: var(--green); border-color: var(--green); background: var(--green-bg); }
+  .person-badge.blue { color: var(--blue); }
+  .person-badge.purple { color: var(--purple); }
 
-  .timeline { margin-top: 20px; }
-  .timeline-item { display: flex; gap: 16px; margin-bottom: 12px; }
-  .timeline-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+  .timeline { margin-top: 10px; }
+  .timeline-item { display: flex; gap: 10px; margin-bottom: 6px; }
+  .timeline-dot { width: 6px; height: 6px; border-radius: 50%; margin-top: 7px; flex-shrink: 0; }
   .timeline-dot.red { background: var(--red); }
   .timeline-dot.amber { background: var(--amber); }
   .timeline-dot.green { background: var(--green); }
   .timeline-dot.blue { background: var(--blue); }
-  .timeline-text { font-size: 14px; color: #374151; line-height: 1.5; }
-  .timeline-text strong { color: var(--fg); }
+  .timeline-text { font-size: 12px; color: var(--fg2); line-height: 1.5; }
 
   /* ── Actions ── */
-  .action { display: flex; gap: 12px; padding: 12px 16px; margin-bottom: 8px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); }
-  .action-priority { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 3px; height: fit-content; margin-top: 2px; flex-shrink: 0; }
+  .actions-section { padding: 32px 44px 12px; }
+  .actions-title { font-size: 18px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 4px; }
+  .actions-sub { font-size: 12px; color: var(--muted); margin-bottom: 20px; font-weight: 500; }
+  .action { padding: 20px 24px; margin-bottom: 12px; border-radius: var(--radius); background: white; border: 1px solid var(--border); position: relative; overflow: hidden; }
+  .action::before { content: ''; position: absolute; top: 0; left: 0; bottom: 0; width: 4px; }
+  .action.p1::before { background: var(--red); }
+  .action.p2::before { background: var(--amber); }
+  .action.p3::before { background: var(--blue); }
+  .action-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .action-priority { font-size: 10px; font-weight: 800; padding: 3px 10px; border-radius: 6px; flex-shrink: 0; letter-spacing: 0.5px; }
   .action-priority.p1 { background: var(--red-bg); color: var(--red); }
   .action-priority.p2 { background: var(--amber-bg); color: var(--amber); }
   .action-priority.p3 { background: var(--blue-bg); color: var(--blue); }
-  .action-text { font-size: 14px; color: #374151; line-height: 1.5; }
-  .action-text strong { color: var(--fg); }
+  .action-urgency { font-size: 11px; color: var(--muted); font-weight: 600; }
+  .action-time { font-size: 11px; color: var(--fg2); font-weight: 700; background: var(--surface); padding: 2px 8px; border-radius: 4px; }
+  .action-title { font-size: 15px; font-weight: 700; color: var(--fg); line-height: 1.35; margin-bottom: 6px; }
+  .action-desc { font-size: 12px; color: var(--fg2); line-height: 1.65; }
+  .action-footer { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+  .action-meta-tag { font-size: 10px; padding: 3px 10px; border-radius: 6px; background: var(--surface); color: var(--muted); font-weight: 600; border: 1px solid var(--border); }
+  .action-roi { font-size: 10px; color: var(--green); font-weight: 700; padding: 3px 10px; background: var(--green-bg); border-radius: 6px; }
+
+  /* ── Section separator ── */
+  .section-sep { padding: 0 44px; margin: 32px 0 0; }
+  .section-sep-line { height: 1px; background: var(--border); }
+  .section-sep-label { font-size: 10px; font-weight: 800; letter-spacing: 2px; color: var(--muted); margin-top: 12px; text-transform: uppercase; }
+
+  /* ── Agenda section ── */
+  .agenda-section { padding: 32px 44px 16px; }
+  .agenda-card { padding: 28px; border-radius: var(--radius); background: linear-gradient(135deg, #f8f7ff 0%, #f0f4ff 100%); border: 1px solid #e0e0ef; }
+  .agenda-title { font-size: 16px; font-weight: 800; color: var(--fg); margin-bottom: 4px; letter-spacing: -0.3px; }
+  .agenda-sub { font-size: 12px; color: var(--muted); margin-bottom: 20px; font-weight: 500; }
+  .agenda-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,0.06); }
+  .agenda-item:last-child { border-bottom: none; }
+  .agenda-num { width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; flex-shrink: 0; background: var(--fg); color: white; }
+  .agenda-text { font-size: 13px; font-weight: 600; color: var(--fg); line-height: 1.5; }
+  .agenda-detail { font-size: 11px; color: var(--muted); margin-top: 2px; font-weight: 500; }
+
+  /* ── Detail section ── */
+  .detail-section { padding: 24px 44px 8px; }
+  .detail-title { font-size: 13px; font-weight: 800; letter-spacing: -0.2px; margin-bottom: 14px; }
+  .discoveries { padding: 0; }
+  .disc-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; color: var(--muted); padding-top: 20px; margin-bottom: 14px; }
+
+  .discovery { margin-bottom: 12px; padding: 22px 24px; border-radius: var(--radius); border: 1px solid var(--border); background: white; position: relative; overflow: hidden; }
+  .discovery::before { content: ''; position: absolute; top: 0; left: 0; bottom: 0; width: 3px; }
+  .discovery.red::before { background: var(--red); }
+  .discovery.amber::before { background: var(--amber); }
+  .discovery.green::before { background: var(--green); }
+  .discovery.blue::before { background: var(--blue); }
+  .discovery.purple::before { background: var(--purple); }
+  .discovery.neutral::before { background: var(--muted); }
+
+  /* ── CTA ── */
+  .cta-banner { margin: 32px 44px; padding: 32px; border-radius: var(--radius); background: linear-gradient(135deg, #0f0f0f 0%, #1a1a2e 100%); color: white; text-align: center; position: relative; overflow: hidden; }
+  .cta-banner::before { content: ''; position: absolute; top: -50%; right: -20%; width: 200px; height: 200px; background: radial-gradient(circle, rgba(139,92,246,0.15) 0%, transparent 70%); border-radius: 50%; }
+  .cta-banner::after { content: ''; position: absolute; bottom: -50%; left: -20%; width: 200px; height: 200px; background: radial-gradient(circle, rgba(59,130,246,0.1) 0%, transparent 70%); border-radius: 50%; }
+  .cta-banner h3 { font-size: 18px; font-weight: 800; margin-bottom: 8px; position: relative; letter-spacing: -0.3px; }
+  .cta-banner p { font-size: 13px; color: rgba(255,255,255,0.55); margin-bottom: 20px; line-height: 1.6; position: relative; }
+  .cta-btn { display: inline-block; padding: 12px 28px; background: white; color: var(--fg); font-size: 14px; font-weight: 700; border-radius: 8px; text-decoration: none; position: relative; letter-spacing: -0.2px; }
 
   /* ── Narrative ── */
-  .narrative-section { padding: 0 48px 48px; }
-  .narrative-heading { font-size: 17px; font-weight: 800; margin: 24px 0 8px; letter-spacing: -0.2px; }
-  .narrative-subheading { font-size: 15px; font-weight: 700; margin: 16px 0 6px; }
-  .narrative-p { font-size: 14px; line-height: 1.7; color: #374151; margin-bottom: 8px; }
+  .narrative-heading { font-size: 15px; font-weight: 800; margin: 18px 0 6px; color: var(--fg); }
+  .narrative-subheading { font-size: 13px; font-weight: 700; margin: 12px 0 4px; color: var(--fg); }
+  .narrative-p { font-size: 13px; line-height: 1.7; color: var(--fg2); margin-bottom: 6px; }
   .narrative-p strong { color: var(--fg); }
-  .narrative-bullet { font-size: 14px; line-height: 1.7; color: #374151; margin: 0 0 4px 18px; padding-left: 8px; border-left: 2px solid var(--border); }
-  .narrative-action { display: flex; gap: 8px; font-size: 14px; color: #374151; margin: 6px 0; padding: 8px 12px; border-radius: 6px; background: var(--surface); }
-  .narrative-action-num { font-weight: 800; color: var(--blue); min-width: 20px; }
-
-  .callout { border-left: 3px solid; padding: 14px 18px; margin: 12px 0; border-radius: 0 8px 8px 0; font-size: 14px; line-height: 1.6; }
+  .narrative-bullet { font-size: 13px; line-height: 1.6; color: var(--fg2); margin: 0 0 4px 16px; padding-left: 8px; border-left: 2px solid var(--border); }
+  .narrative-action { display: flex; gap: 8px; font-size: 13px; color: var(--fg2); margin: 4px 0; padding: 10px 14px; border-radius: 8px; background: var(--surface); }
+  .narrative-action-num { font-weight: 800; color: var(--fg); min-width: 18px; }
+  .callout { border-left: 3px solid; padding: 14px 18px; margin: 12px 0; border-radius: 0 8px 8px 0; font-size: 13px; line-height: 1.6; }
   .callout.red { border-left-color: var(--red); background: var(--red-bg); }
   .callout.green { border-left-color: var(--green); background: var(--green-bg); }
   .callout.blue { border-left-color: var(--blue); background: var(--blue-bg); }
-  .callout-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .callout-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
   .callout.red .callout-tag { color: var(--red); }
   .callout.green .callout-tag { color: var(--green); }
   .callout.blue .callout-tag { color: var(--blue); }
-  .callout-body { color: #374151; }
-  .callout-body strong { color: var(--fg); }
+  .callout-body { color: var(--fg2); }
 
   /* ── Footer ── */
-  .divider { height: 1px; background: var(--border); margin: 0 48px; }
-  .footer { padding: 32px 48px; }
-  .footer-text { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .footer { padding: 28px 44px 32px; border-top: 1px solid var(--border); background: var(--surface); }
+  .footer-text { font-size: 10px; color: var(--muted); font-weight: 500; }
+  .footer-brand { font-size: 10px; font-weight: 700; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; margin-bottom: 6px; }
 
   /* ── Download bar ── */
-  .download-bar { position: fixed; top: 0; left: 0; right: 0; background: var(--fg); color: white; padding: 12px 24px; display: flex; align-items: center; justify-content: center; gap: 16px; z-index: 50; }
-  .download-bar button { background: var(--blue); color: white; border: none; padding: 8px 24px; font-size: 13px; font-weight: 600; border-radius: 6px; cursor: pointer; }
-  .download-bar button:hover { opacity: 0.9; }
-  .download-bar + .page { margin-top: 48px; }
+  .download-bar { position: fixed; top: 0; left: 0; right: 0; background: var(--fg); color: white; padding: 10px 20px; display: flex; align-items: center; justify-content: center; gap: 12px; z-index: 50; font-size: 12px; font-weight: 600; }
+  .download-bar button { background: white; color: var(--fg); border: none; padding: 6px 18px; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; }
+  .download-bar + .page { margin-top: 44px; }
 
   @media print {
     body { background: white; }
-    .page { box-shadow: none; }
+    .page { border: none; box-shadow: none; border-radius: 0; }
     .download-bar { display: none !important; }
-    .discovery { break-inside: avoid; }
+    .cta-banner { display: none !important; }
+    .agenda-section { break-inside: avoid; }
+    .discovery, .finding-hero, .finding-card, .action { break-inside: avoid; }
     @page { margin: 0.5in; size: letter; }
   }
 `;
@@ -1355,6 +1719,7 @@ interface ReportHtmlOptions {
   healthScore?: HealthScore | null;
   reportDepth?: "EXECUTIVE" | "STANDARD" | "FULL" | null;
   recipientName?: string | null;
+  meetingLink?: string | null;
 }
 
 export function buildReportHtml(opts: ReportHtmlOptions): string {
@@ -1370,9 +1735,10 @@ export function buildReportHtml(opts: ReportHtmlOptions): string {
     healthScore = null,
     reportDepth = null,
     recipientName = null,
+    meetingLink = "https://calendly.com/arjundixit3508/30min",
   } = opts;
 
-  const periodLabel = `${format(periodStart, "MMM d")} — ${format(periodEnd, "MMM d, yyyy")}`;
+  const periodLabel = `${format(periodStart, "MMM d")} to ${format(periodEnd, "MMM d, yyyy")}`;
   const genDate = generatedAt ? format(generatedAt, "MMM d, yyyy") : format(new Date(), "MMM d, yyyy");
   const connectedSources = (content.connectedSources || []) as string[];
   const reportNumber = content.reportNumber || 1;
@@ -1380,6 +1746,7 @@ export function buildReportHtml(opts: ReportHtmlOptions): string {
   // ── Generate all discoveries ──
   const allDiscoveries: Discovery[] = [
     ...discoverHealthScore(healthScore, content),
+    ...discoverCelebration(healthScore, content),
     ...discoverPriorActions(content),
     ...discoverSlackBlockers(content),
     ...discoverContributorRisk(content),
@@ -1395,6 +1762,8 @@ export function buildReportHtml(opts: ReportHtmlOptions): string {
     ...discoverDeliverableProgress(content),
     ...discoverTrends(content),
     ...discoverContributorHighlights(content),
+    ...discoverGitHubOverview(content),
+    ...discoverConnectMore(content),
     ...discoverBenchmarks(content),
     ...discoverProgression(content),
   ];
@@ -1423,6 +1792,7 @@ export function buildReportHtml(opts: ReportHtmlOptions): string {
   const colorOrder: Record<string, number> = { red: 0, amber: 1, purple: 2, blue: 3, green: 4, neutral: 5 };
   // But keep health score first always, and "What changed" second
   const healthDiscovery = allDiscoveries.length > 0 && allDiscoveries[0].label === "Engineering Health Index" ? allDiscoveries.shift()! : null;
+  const celebrationDiscovery = allDiscoveries.length > 0 && allDiscoveries[0].label === "Win of the week" ? allDiscoveries.shift()! : null;
   const priorActionsDiscovery = allDiscoveries.length > 0 && allDiscoveries[0].label === "What changed since last report" ? allDiscoveries.shift()! : null;
 
   allDiscoveries.sort((a, b) => (colorOrder[a.color] ?? 5) - (colorOrder[b.color] ?? 5));
@@ -1432,6 +1802,7 @@ export function buildReportHtml(opts: ReportHtmlOptions): string {
 
   const orderedDiscoveries: Discovery[] = [];
   if (healthDiscovery) orderedDiscoveries.push(healthDiscovery);
+  if (celebrationDiscovery) orderedDiscoveries.push(celebrationDiscovery);
   if (priorActionsDiscovery) orderedDiscoveries.push(priorActionsDiscovery);
   orderedDiscoveries.push(...allDiscoveries.slice(0, maxCards - orderedDiscoveries.length));
 
@@ -1450,8 +1821,182 @@ export function buildReportHtml(opts: ReportHtmlOptions): string {
   };
 
   // ── Build headline ──
-  const headlineCount = discoveryCount;
   const headlineSources = connectedSources.length;
+
+  // ── Separate discoveries into sections ──
+  const changesDisc = orderedDiscoveries.find(d => d.label === "What changed since last report");
+  const celebrationDisc = orderedDiscoveries.find(d => d.label === "Win of the week");
+
+  // All findings except health score, changes, celebration — these become the numbered insights
+  const findings = orderedDiscoveries
+    .filter(d => d.label !== "Engineering Health Index" && d.label !== "What changed since last report" && d.label !== "Win of the week");
+
+  // Top 5 for the overview + detail cards, rest go to detail section
+  const topFindings = findings.slice(0, 5);
+  const detailDiscoveries = findings.slice(5);
+
+  // Risk pill helper
+  function riskPill(d: Discovery): string {
+    const pillMap: Record<DiscoveryColor, { cls: string; text: string }> = {
+      red: { cls: "high", text: "High Risk" },
+      amber: { cls: "medium", text: "Medium Risk" },
+      green: { cls: "low", text: "Low Risk" },
+      blue: { cls: "info", text: "Info" },
+      purple: { cls: "insight", text: "Insight" },
+      neutral: { cls: "info", text: "Info" },
+    };
+    const pill = pillMap[d.color] || pillMap.neutral;
+    return `<span class="risk-pill ${pill.cls}">${pill.text}</span>`;
+  }
+
+  // Helper: render a finding card's inner content (shared between hero and grid cards)
+  function findingInner(d: Discovery): string {
+    let html = "";
+    if (d.sources.length > 0) html += `<div style="margin-bottom:8px">${sourceTags(d.sources)}</div>`;
+    if (d.bigNum) {
+      const isTextVal = isNaN(Number(d.bigNum.value.replace(/[,$%]/g, "")));
+      html += `<div class="big-num ${d.color}${isTextVal ? " text-value" : ""}">${d.bigNum.value}</div>`;
+      html += `<div class="big-label">${esc(d.bigNum.label)}</div>`;
+    }
+    html += `<div class="disc-headline">${d.headline}</div>`;
+    html += `<div class="disc-body">${d.body}</div>`;
+    if (d.dataGrid && d.dataGrid.length > 0) {
+      const cols = d.dataGrid.length >= 4 ? "four" : "";
+      html += `<div class="data-grid ${cols}">`;
+      for (const cell of d.dataGrid) {
+        const colorStyle = cell.color ? ` style="color:var(--${cell.color})"` : "";
+        html += `<div class="data-cell"><div class="val"${colorStyle}>${cell.value}</div><div class="label">${esc(cell.label)}</div></div>`;
+      }
+      html += `</div>`;
+    }
+    if (d.personRows && d.personRows.length > 0) {
+      html += `<div style="margin-top:14px">`;
+      for (const p of d.personRows) {
+        html += `<div class="person-row"><div class="person-avatar">${esc(p.initials)}</div><div class="person-info"><div class="person-name">${p.name}</div><div class="person-detail">${p.detail}</div></div><div class="person-badge ${p.badgeColor}">${esc(p.badge)}</div></div>`;
+      }
+      html += `</div>`;
+    }
+    if (d.timeline && d.timeline.length > 0) {
+      html += `<div class="timeline">`;
+      for (const t of d.timeline) {
+        html += `<div class="timeline-item"><div class="timeline-dot ${t.color}"></div><div class="timeline-text">${t.text}</div></div>`;
+      }
+      html += `</div>`;
+    }
+    return html;
+  }
+
+  // Health strip
+  function healthStripHtml(): string {
+    if (!healthScore) return "";
+    const score = healthScore.overall;
+    const scoreColor = score >= 80 ? "var(--green)" : score >= 60 ? "var(--blue)" : score >= 40 ? "var(--amber)" : "var(--red)";
+    const priorScore = content.priorReport?.keyMetrics?.healthScore as number | undefined;
+    const delta = priorScore != null ? score - priorScore : null;
+    const deltaText = delta != null
+      ? (delta > 0 ? `<span class="delta-line" style="color:var(--green)">+${delta} vs last report</span>` : delta < 0 ? `<span class="delta-line" style="color:var(--red)">${delta} vs last report</span>` : `<span class="delta-line" style="color:var(--muted)">No change</span>`)
+      : `<span class="delta-line" style="color:var(--muted)">First report</span>`;
+
+    return `
+    <div class="health-strip">
+      <div class="health-score-big" style="color:${scoreColor}">${score}</div>
+      <div class="health-meta">
+        <div class="grade-line">Grade ${healthScore.grade} · Health Index</div>
+        ${deltaText}
+      </div>
+      <div class="health-dims">
+        ${healthScore.dimensions.map(d => {
+          const c = d.score >= 80 ? "var(--green)" : d.score >= 60 ? "var(--blue)" : d.score >= 40 ? "var(--amber)" : "var(--red)";
+          return `<div class="health-dim"><span class="dim-score" style="color:${c}">${d.score}</span> ${esc(d.label)}</div>`;
+        }).join("")}
+      </div>
+    </div>`;
+  }
+
+  // ROI context per discovery
+  function roiHint(d: Discovery): string {
+    if (d.color === "red") return "Fix this first";
+    if (d.color === "amber") return "Costing you hours every week";
+    if (d.color === "green") return "Working well, keep it up";
+    if (d.color === "purple") return "Opportunity to level up";
+    return "Worth knowing";
+  }
+
+  // TLDR builder
+  function buildTldr(): string {
+    const redCount = topFindings.filter(d => d.color === "red").length;
+    const amberCount = topFindings.filter(d => d.color === "amber").length;
+    const actionCount = content.actionItems?.length || 0;
+
+    if (redCount > 0) {
+      return `We found <strong>${redCount} ${redCount === 1 ? "thing" : "things"} that could hurt your business</strong>${amberCount > 0 ? ` and ${amberCount} ${amberCount === 1 ? "area" : "areas"} to tighten up` : ""}. ` +
+        `The good news: the most important fixes are quick. <strong>${actionCount} action items</strong> below. ` +
+        `We'll handle the technical ones together on your next call.`;
+    } else if (amberCount > 0) {
+      return `Your product is shipping, but we spotted <strong>${amberCount} ${amberCount === 1 ? "gap" : "gaps"}</strong> that will matter more as you grow. ` +
+        `<strong>${actionCount} recommendations</strong> below, ordered by business impact.`;
+    }
+    return `<strong>${topFindings.length} findings</strong> and <strong>${actionCount} recommendations</strong> from this period. Things are moving, and here's how to keep the momentum.`;
+  }
+
+  // Agenda builder
+  function buildAgendaItems(): { text: string; detail: string }[] {
+    const items: { text: string; detail: string }[] = [];
+    const redFindings = topFindings.filter(d => d.color === "red");
+    const amberFindings = topFindings.filter(d => d.color === "amber");
+    const purpleFindings = topFindings.filter(d => d.color === "purple");
+    const actionItems = content.actionItems || [];
+    const p1Actions = actionItems.filter((a: any) => a.priority === "P1");
+
+    if (redFindings.length > 0) {
+      items.push({
+        text: `Address ${redFindings.length} critical ${redFindings.length === 1 ? "risk" : "risks"}`,
+        detail: redFindings.map((d: Discovery) => d.headline.replace(/<[^>]+>/g, "").slice(0, 120)).join("; "),
+      });
+    }
+    if (p1Actions.length > 0) {
+      items.push({
+        text: `Implement P1 action items together`,
+        detail: p1Actions.map((a: any) => a.title).join(", "),
+      });
+    }
+    if (amberFindings.length > 0) {
+      items.push({
+        text: `Review process improvements`,
+        detail: amberFindings.map((d: Discovery) => d.label).join(", "),
+      });
+    }
+    if (purpleFindings.length > 0) {
+      items.push({
+        text: `Connect additional data sources for deeper insights`,
+        detail: "5 min per integration, unlocks cross-source analysis",
+      });
+    }
+    if (items.length === 0) {
+      items.push({ text: "Review findings and plan next steps", detail: "30-minute strategy session" });
+    }
+    return items.slice(0, 4);
+  }
+
+  // Overview: numbered 1-5 summary
+  function overviewHtml(): string {
+    if (topFindings.length === 0) return "";
+    return `
+    <div class="overview">
+      <div class="overview-title">Your ${topFindings.length} Key Findings</div>
+      <div class="overview-list">
+        ${topFindings.map((d, i) => `
+        <div class="overview-item">
+          <div class="overview-num ${d.color}">${i + 1}</div>
+          <div class="overview-content">
+            <div class="overview-headline">${d.headline.replace(/<[^>]+>/g, "").slice(0, 140)}</div>
+            <div class="overview-sub">${roiHint(d)}${d.sources.length > 0 ? ` · ${d.sources.map(s => (SOURCE_META[s]?.label || s)).join(", ")}` : ""}</div>
+          </div>
+          <div class="overview-pill">${riskPill(d)}</div>
+        </div>`).join("")}
+      </div>
+    </div>`;
+  }
 
   // ── Build HTML ──
   return `<!DOCTYPE html>
@@ -1459,13 +2004,13 @@ export function buildReportHtml(opts: ReportHtmlOptions): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${esc(title)} — NexFlow</title>
+<title>${esc(title)} | NexFlow</title>
 <style>${CSS}</style>
 </head>
 <body>
 
 ${showDownloadBar ? `<div class="download-bar">
-  <span style="font-size:12px">Report Preview — ${esc(orgName)}</span>
+  Report Preview · ${esc(orgName)}
   <button onclick="window.print()">Download PDF</button>
 </div>` : ""}
 
@@ -1473,15 +2018,17 @@ ${showDownloadBar ? `<div class="download-bar">
 
   <div class="header">
     <div class="header-top">
-      <div><span class="brand">NexFlow Engineering Intelligence</span><span class="tag">Report #${reportNumber}</span></div>
+      <div><span class="brand">NexFlow</span><span class="tag">Brief #${reportNumber}</span></div>
       <div class="period">${esc(periodLabel)}</div>
     </div>
-    <h1>${headlineCount} things we found across <span>${esc(orgName)}'s</span> engineering org</h1>
-    <div class="header-sub">We analyzed ${headlineSources} data source${headlineSources !== 1 ? "s" : ""} and ${periodLabel} of activity. Here's what stood out — and what needs your attention.</div>
+    <div class="header-company">${esc(orgName)}</div>
+    <div class="header-subtitle">Your engineering consulting brief · <strong>${headlineSources} source${headlineSources !== 1 ? "s" : ""}</strong> analyzed</div>
     <div class="sources">
       ${connectedSources.map((s) => `<div class="source-pill active">${sourceMap[s] || s}</div>`).join("")}
     </div>
   </div>
+
+  ${healthStripHtml()}
 
   ${weekStats.length > 0 ? `
   <div class="week-bar">
@@ -1493,23 +2040,97 @@ ${showDownloadBar ? `<div class="download-bar">
     </div>`).join("")}
   </div>` : ""}
 
-  <div class="discoveries">
-    <div class="disc-label">The discoveries</div>
-    ${orderedDiscoveries.map((d, i) => renderDiscovery(d, i + 1)).join("\n")}
-
-    ${content.actionItems?.length > 0 ? renderActionItems(content.actionItems) : ""}
-
-    ${aiNarrative ? `
-    <div class="disc-label">Detailed analysis</div>
-    <div class="discovery neutral" style="padding:32px">
-      ${renderNarrative(aiNarrative)}
-    </div>` : ""}
+  <div class="tldr">
+    <div class="tldr-label">The bottom line</div>
+    <div class="tldr-text">${buildTldr()}</div>
   </div>
 
-  <div class="divider"></div>
+  ${overviewHtml()}
+
+  <div class="sep"></div>
+
+  ${topFindings.length > 0 ? `
+  <div class="findings">
+    <div class="findings-title">What We Found</div>
+
+    ${topFindings[0] ? `
+    <div class="finding-hero ${topFindings[0].color}">
+      <div class="finding-badge">
+        <div class="finding-num ${topFindings[0].color}">1</div>
+        ${riskPill(topFindings[0])}
+        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:inherit;opacity:0.7">${esc(topFindings[0].label)}</span>
+      </div>
+      ${findingInner(topFindings[0])}
+    </div>` : ""}
+
+    ${topFindings.length > 1 ? `
+    <div class="finding-grid">
+      ${topFindings.slice(1).map((d, i) => {
+        const needsFull = (d.dataGrid && d.dataGrid.length > 0) || (d.personRows && d.personRows.length > 0) || (d.bigNum);
+        return `
+        <div class="finding-card ${d.color}${needsFull ? " finding-full" : ""}">
+          <div class="finding-badge">
+            <div class="finding-num ${d.color}">${i + 2}</div>
+            ${riskPill(d)}
+            <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.6">${esc(d.label)}</span>
+          </div>
+          ${findingInner(d)}
+        </div>`;
+      }).join("")}
+    </div>` : ""}
+  </div>` : ""}
+
+  ${celebrationDisc ? `
+  <div style="padding: 0 44px 16px;">
+    <div class="finding-card green" style="border-left: 4px solid var(--green);">
+      <div class="finding-badge">
+        <span class="risk-pill win">Win</span>
+        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--green)">${esc(celebrationDisc.label)}</span>
+      </div>
+      <div class="disc-headline">${celebrationDisc.headline}</div>
+      <div class="disc-body">${celebrationDisc.body}</div>
+    </div>
+  </div>` : ""}
+
+  ${changesDisc ? `
+  <div class="section-sep"><div class="section-sep-line"></div><div class="section-sep-label">What Changed</div></div>
+  <div style="padding: 16px 44px;">
+    ${renderDiscovery(changesDisc, 0)}
+  </div>` : ""}
+
+  ${content.actionItems?.length > 0 ? `
+  <div class="sep"></div>
+  <div class="actions-section">
+    <div class="actions-title">Your Action Plan</div>
+    <div class="actions-sub">Do the top ones this week. We'll check progress on our next call.</div>
+    ${renderActionItems(content.actionItems)}
+  </div>` : ""}
+
+  <div class="sep"></div>
+  <div class="agenda-section">
+    <div class="agenda-card">
+      <div class="agenda-title">Next Consulting Call Agenda</div>
+      <div class="agenda-sub">Here's what we'll cover together. Book your slot below.</div>
+      ${buildAgendaItems().map((item, i) => `
+      <div class="agenda-item">
+        <div class="agenda-num">${i + 1}</div>
+        <div>
+          <div class="agenda-text">${item.text}</div>
+          <div class="agenda-detail">${item.detail}</div>
+        </div>
+      </div>`).join("")}
+    </div>
+  </div>
+
+  <div class="cta-banner">
+    <h3>Let's fix these together</h3>
+    <p>Book a 30-minute call with your NexFlow advisor. We'll implement the P1 actions live and plan the rest.</p>
+    <a href="${meetingLink || "https://calendly.com/arjundixit3508/30min"}" class="cta-btn">Book Your Call</a>
+  </div>
 
   <div class="footer">
-    <div class="footer-text">Confidential · NexFlow Engineering Intelligence · Generated for ${esc(orgName)} · ${esc(genDate)}</div>
+    <div class="footer-brand">NexFlow</div>
+    <div class="footer-text">Confidential consulting brief · Prepared for ${esc(orgName)} · ${esc(genDate)}</div>
   </div>
 
 </div>

@@ -32,11 +32,15 @@ interface SendReportEmailOptions {
   reportViewUrl: string;
   pdfDownloadUrl: string;
   healthScore?: HealthScoreEmail | null;
+  healthScoreDelta?: number | null;
   topDiscoveries?: string[];
   recipientName?: string;
   recipientRole?: string;
   reportDepth?: string;
   unsubscribeUrl?: string;
+  nextReportDate?: string;
+  customMessage?: string;
+  attachments?: { filename: string; content: Buffer | string; contentType?: string }[];
 }
 
 export async function sendReportEmail({
@@ -48,66 +52,77 @@ export async function sendReportEmail({
   reportViewUrl,
   pdfDownloadUrl,
   healthScore = null,
+  healthScoreDelta = null,
   topDiscoveries = [],
   recipientName,
   recipientRole,
   reportDepth,
   unsubscribeUrl,
+  nextReportDate,
+  customMessage,
+  attachments,
 }: SendReportEmailOptions) {
-  // Role-aware greeting and depth label
-  const greeting = recipientName ? `Hi ${recipientName.split(" ")[0]},` : "";
+  const firstName = recipientName ? recipientName.split(" ")[0] : "";
   const depthLabel = reportDepth === "EXECUTIVE" ? "Executive Summary" : reportDepth === "STANDARD" ? "Team Report" : "";
-  const roleLabel = recipientRole ? recipientRole.replace(/_/g, " ") : "";
 
-  // Health score for email — monochrome
+  // Health score color
+  const scoreColor = healthScore
+    ? healthScore.overall >= 80 ? "#30a46c" : healthScore.overall >= 60 ? "#3b82f6" : healthScore.overall >= 40 ? "#e5940c" : "#e5484d"
+    : "#888";
+
+  // Health score card
   const healthHtml = healthScore
-    ? `<table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 16px; border: 1px solid #ddd;">
+    ? `<table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 20px; border-radius: 12px; overflow: hidden; border: 1px solid #e5e5ea;">
         <tr>
-          <td style="padding: 16px; text-align: center; width: 100px; border-right: 1px solid #ddd; background: #fafafa;">
-            <div style="font-size: 32px; font-weight: 700; color: #1a1a1a; line-height: 1;">${healthScore.overall}</div>
-            <div style="font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-top: 3px;">Health Index</div>
-            <div style="font-size: 16px; font-weight: 700; color: #1a1a1a; margin-top: 1px;">${healthScore.grade}</div>
+          <td style="padding: 20px 24px; text-align: center; width: 110px; background: #f7f7f8; border-right: 1px solid #e5e5ea;">
+            <div style="font-size: 42px; font-weight: 900; color: ${scoreColor}; line-height: 1; letter-spacing: -2px;">${healthScore.overall}</div>
+            <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #8c8c8c; margin-top: 4px;">Health Index</div>
+            <div style="display: inline-block; margin-top: 6px; padding: 3px 10px; border-radius: 6px; background: ${scoreColor}; color: #fff; font-size: 11px; font-weight: 800; letter-spacing: 0.5px;">Grade ${healthScore.grade}</div>
+            ${healthScoreDelta != null && healthScoreDelta !== 0
+              ? `<div style="font-size: 11px; font-weight: 700; color: ${healthScoreDelta > 0 ? '#30a46c' : '#e5484d'}; margin-top: 4px;">${healthScoreDelta > 0 ? '+' : ''}${healthScoreDelta} vs prior</div>`
+              : '<div style="font-size: 10px; color: #8c8c8c; margin-top: 4px;">First report</div>'}
           </td>
-          <td style="padding: 12px 16px; vertical-align: top;">
-            ${healthScore.dimensions.map((d) => `
-            <div style="margin-bottom: 4px;">
+          <td style="padding: 16px 20px; vertical-align: top;">
+            ${healthScore.dimensions.map((d) => {
+              const barColor = d.score >= 80 ? "#30a46c" : d.score >= 60 ? "#3b82f6" : d.score >= 40 ? "#e5940c" : "#e5484d";
+              return `
+            <div style="margin-bottom: 6px;">
               <table width="100%" cellpadding="0" cellspacing="0">
                 <tr>
-                  <td style="font-size: 10px; color: #666; width: 110px; padding-right: 6px;">${d.label}</td>
-                  <td style="padding: 1px 0;">
-                    <div style="background: #e5e5e5; height: 5px; width: 100%;">
-                      <div style="background: #1a1a1a; height: 5px; width: ${d.score}%;"></div>
+                  <td style="font-size: 11px; color: #3a3a3a; width: 120px; padding-right: 8px; font-weight: 500;">${d.label}</td>
+                  <td style="padding: 2px 0;">
+                    <div style="background: #e5e5ea; height: 6px; border-radius: 3px; width: 100%;">
+                      <div style="background: ${barColor}; height: 6px; border-radius: 3px; width: ${d.score}%;"></div>
                     </div>
                   </td>
-                  <td style="font-size: 10px; font-weight: 700; color: #1a1a1a; width: 28px; text-align: right;">${d.score}</td>
+                  <td style="font-size: 11px; font-weight: 800; color: ${barColor}; width: 30px; text-align: right;">${d.score}</td>
                 </tr>
               </table>
-            </div>`).join("")}
+            </div>`;
+            }).join("")}
           </td>
         </tr>
       </table>`
     : "";
 
-  // KPI strip
-  const kpiHtml = kpis.length > 0
-    ? `<table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 16px; border-top: 1px solid #1a1a1a; border-bottom: 1px solid #ddd;">
+  // Discoveries
+  const discoveriesHtml = topDiscoveries.length > 0
+    ? `<table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 20px; border-radius: 12px; overflow: hidden; border: 1px solid #e5e5ea;">
         <tr>
-          ${kpis.map((k) => `
-          <td style="padding: 8px 10px; border-right: 1px solid #eee;">
-            <div style="font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #888;">${k.label}</div>
-            <div style="font-size: 18px; font-weight: 700; color: #1a1a1a; line-height: 1.2; margin-top: 1px;">${k.value}</div>
-            <div style="font-size: 9px; color: #888;">${k.detail}</div>
-          </td>`).join("")}
+          <td style="padding: 16px 20px; background: #f7f7f8;">
+            <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; color: #8c8c8c; margin-bottom: 10px;">Key Findings</div>
+            ${topDiscoveries.map((d) => `
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 6px;">
+              <tr>
+                <td width="8" valign="top" style="padding-top: 6px;">
+                  <div style="width: 5px; height: 5px; border-radius: 50%; background: #0f0f0f;"></div>
+                </td>
+                <td style="font-size: 13px; color: #3a3a3a; line-height: 1.5; padding-left: 10px; font-weight: 500;">${d}</td>
+              </tr>
+            </table>`).join("")}
+          </td>
         </tr>
       </table>`
-    : "";
-
-  // Top discoveries preview
-  const discoveriesHtml = topDiscoveries.length > 0
-    ? `<div style="margin: 16px 0; padding: 12px 16px; background: #fafafa; border-left: 2px solid #1a1a1a;">
-        <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 8px;">Key Findings</div>
-        ${topDiscoveries.map((d) => `<div style="font-size: 12px; color: #333; margin-bottom: 4px; line-height: 1.5;">&#8226; ${d}</div>`).join("")}
-      </div>`
     : "";
 
   const html = `
@@ -116,55 +131,85 @@ export async function sendReportEmail({
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!--[if mso]><style>body{font-family:Arial,sans-serif !important}</style><![endif]-->
 </head>
-<body style="margin: 0; padding: 0; background-color: #f5f5f5; font-family: Helvetica, Arial, sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 32px 0;">
+<body style="margin: 0; padding: 0; background-color: #eeeef0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #eeeef0; padding: 40px 0;">
     <tr>
       <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff;">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.04);">
+
+          <!-- Header -->
           <tr>
-            <td style="padding: 24px 28px; border-bottom: 2px solid #1a1a1a;">
-              <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: #1a1a1a;">NexFlow Engineering Intelligence</div>
+            <td style="padding: 32px 36px 24px; background: #fafafa; border-bottom: 1px solid #e5e5ea; position: relative;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <div style="font-size: 10px; font-weight: 700; letter-spacing: 2.5px; color: #8c8c8c; text-transform: uppercase;">NexFlow</div>
+                  </td>
+                  <td align="right">
+                    <div style="display: inline-block; font-size: 10px; font-weight: 700; padding: 4px 12px; border-radius: 6px; background: #0f0f0f; color: #ffffff; letter-spacing: 0.3px;">Brief #1</div>
+                  </td>
+                </tr>
+              </table>
+              <div style="margin-top: 16px; font-size: 26px; font-weight: 900; letter-spacing: -0.5px; color: #0f0f0f; line-height: 1.1;">${orgName}</div>
+              <div style="margin-top: 6px; font-size: 13px; color: #3a3a3a; font-weight: 500;">${reportTitle}</div>
+              ${depthLabel ? `<div style="margin-top: 6px;"><span style="font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #fff; background: #0f0f0f; padding: 3px 10px; border-radius: 4px;">${depthLabel}</span></div>` : ""}
+              <!-- Gradient bar -->
+              <div style="margin-top: 20px; height: 3px; border-radius: 2px; background: linear-gradient(90deg, #0f0f0f 0%, #3b82f6 50%, #8b5cf6 100%);"></div>
             </td>
           </tr>
+
+          <!-- Body -->
           <tr>
-            <td style="padding: 24px 28px;">
-              ${greeting ? `<p style="margin: 0 0 12px; font-size: 13px; color: #333;">${greeting}</p>` : ""}
-              <h2 style="margin: 0 0 4px; font-size: 18px; color: #1a1a1a; font-weight: 700;">${reportTitle}</h2>
-              <div style="margin: 0 0 16px; display: flex; gap: 8px; align-items: center;">
-                <span style="font-size: 11px; color: #888;">Prepared for ${orgName}</span>
-                ${depthLabel ? `<span style="font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #fff; background: #1a1a1a; padding: 2px 8px; border-radius: 3px;">${depthLabel}</span>` : ""}
-              </div>
+            <td style="padding: 28px 36px;">
+
+              ${firstName ? `<p style="margin: 0 0 16px; font-size: 14px; color: #0f0f0f; font-weight: 600;">Hi ${firstName},</p>` : ""}
+
+              ${customMessage
+                ? `<p style="margin: 0 0 24px; font-size: 14px; line-height: 1.7; color: #3a3a3a;">${customMessage}</p>`
+                : `<p style="margin: 0 0 24px; font-size: 14px; line-height: 1.7; color: #3a3a3a;">Your engineering brief is ready. It includes health scoring, risk analysis, and prioritized recommendations from your NexFlow consulting team.</p>`}
 
               ${healthHtml}
-              ${kpiHtml}
               ${discoveriesHtml}
 
-              <p style="margin: 0 0 16px; font-size: 12px; line-height: 1.6; color: #333;">
-                Your full engineering report is ready. It includes health index scoring, delivery metrics, code review analysis, risk signals, and prioritized recommendations.
+              <!-- CTA Button -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 28px 0 16px;">
+                <tr>
+                  <td align="center">
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="border-radius: 10px; background: #0f0f0f;">
+                          <a href="${reportViewUrl}" target="_blank" style="display: inline-block; padding: 14px 36px; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; letter-spacing: -0.2px;">View Your Full Brief</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 0 0 24px; font-size: 11px; color: #8c8c8c; text-align: center;">
+                <a href="${pdfDownloadUrl}" style="color: #8c8c8c; text-decoration: underline; font-weight: 500;">Download as PDF</a>
               </p>
 
-              <div style="text-align: center; margin: 24px 0;">
-                <a href="${reportViewUrl}" style="display: inline-block; background-color: #1a1a1a; color: #ffffff; padding: 14px 32px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600;">View Full Report</a>
-              </div>
-
-              <p style="margin: 0; font-size: 11px; color: #aaa; text-align: center;">
-                <a href="${pdfDownloadUrl}" style="color: #888; text-decoration: underline;">Download as PDF</a>
-              </p>
-
-              <p style="margin: 16px 0 0; font-size: 12px; line-height: 1.6; color: #333;">
-                Reply to this email with questions or feedback.
+              <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #3a3a3a;">
+                Reply to this email with any questions. Or <a href="https://calendly.com/arjundixit3508/30min" style="color: #0f0f0f; font-weight: 700; text-decoration: underline;">book a call</a> and we'll walk through it together.
               </p>
             </td>
           </tr>
+
+          <!-- Footer -->
           <tr>
-            <td style="border-top: 1px solid #ddd; padding: 16px 28px;">
-              <p style="margin: 0; font-size: 9px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px;">
-                Confidential — intended for the recipient only
+            <td style="border-top: 1px solid #e5e5ea; padding: 20px 36px; background: #f7f7f8;">
+              ${nextReportDate ? `<p style="margin: 0 0 6px; font-size: 11px; color: #3a3a3a; font-weight: 600;">Your next report arrives <strong>${nextReportDate}</strong></p>` : ""}
+              <div style="font-size: 9px; font-weight: 700; letter-spacing: 2px; color: #8c8c8c; text-transform: uppercase; margin-bottom: 4px;">NexFlow</div>
+              <p style="margin: 0; font-size: 10px; color: #8c8c8c;">
+                Confidential consulting brief · Prepared for ${orgName}
               </p>
-              ${unsubscribeUrl ? `<p style="margin: 8px 0 0; font-size: 9px; color: #ccc;"><a href="${unsubscribeUrl}" style="color: #ccc; text-decoration: underline;">Unsubscribe from reports</a></p>` : ""}
+              ${unsubscribeUrl ? `<p style="margin: 6px 0 0; font-size: 9px;"><a href="${unsubscribeUrl}" style="color: #bbb; text-decoration: underline;">Unsubscribe from reports</a></p>` : ""}
             </td>
           </tr>
+
         </table>
       </td>
     </tr>
@@ -177,6 +222,7 @@ export async function sendReportEmail({
     to,
     subject,
     html,
+    ...(attachments?.length ? { attachments } : {}),
   };
 
   // Add List-Unsubscribe header for email client native unsubscribe
@@ -212,38 +258,53 @@ export async function sendOnboardingEmail({
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f9fafb; padding: 40px 0;">
+<body style="margin: 0; padding: 0; background-color: #eeeef0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #eeeef0; padding: 40px 0;">
     <tr>
       <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.04);">
           <tr>
-            <td style="background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%); padding: 28px 32px;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 20px; font-weight: 600;">NexFlow</h1>
-              <p style="margin: 4px 0 0; color: #93c5fd; font-size: 12px;">Engineering Intelligence</p>
+            <td style="padding: 32px 36px 24px; background: #fafafa; border-bottom: 1px solid #e5e5ea;">
+              <div style="font-size: 10px; font-weight: 700; letter-spacing: 2.5px; color: #8c8c8c; text-transform: uppercase;">NexFlow</div>
+              <div style="margin-top: 16px; font-size: 24px; font-weight: 900; letter-spacing: -0.5px; color: #0f0f0f;">Welcome, ${clientName}</div>
+              <div style="margin-top: 6px; font-size: 13px; color: #3a3a3a; font-weight: 500;">Your engineering consulting is ready to set up</div>
+              <div style="margin-top: 20px; height: 3px; border-radius: 2px; background: linear-gradient(90deg, #0f0f0f 0%, #3b82f6 50%, #8b5cf6 100%);"></div>
             </td>
           </tr>
           <tr>
-            <td style="padding: 32px;">
-              <h2 style="margin: 0 0 16px; font-size: 22px; color: #111827;">Welcome to NexFlow, ${clientName}!</h2>
-              <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.6; color: #374151;">
-                You have been invited to set up <strong>${companyName}</strong> on NexFlow, our AI-powered engineering reporting platform.
+            <td style="padding: 28px 36px;">
+              <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.7; color: #3a3a3a;">
+                Your team at <strong>${companyName}</strong> is being onboarded to NexFlow, your embedded AI engineering consulting partner.
               </p>
-              <p style="margin: 0 0 24px; font-size: 14px; line-height: 1.6; color: #374151;">
-                Click the button below to connect your tools (GitHub, Slack, Linear, Google Calendar) and start receiving comprehensive engineering reports.
+              <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.7; color: #3a3a3a;">
+                We work alongside your engineering leadership to surface blind spots, optimize internal operations, and deliver weekly action briefs that tell you exactly what to focus on.
               </p>
-              <div style="text-align: center; margin: 32px 0;">
-                <a href="${setupUrl}" style="display: inline-block; background-color: #1e40af; color: #ffffff; padding: 14px 32px; border-radius: 6px; text-decoration: none; font-size: 16px; font-weight: 600;">Set Up Your Account</a>
-              </div>
-              <p style="margin: 0 0 8px; font-size: 12px; color: #9ca3af;">
-                This link will expire in 7 days. If you did not expect this invitation, you can safely ignore this email.
+              <p style="margin: 0 0 24px; font-size: 14px; line-height: 1.7; color: #3a3a3a;">
+                Click below to connect your tools (GitHub, Slack, Jira, Linear) and we'll start building your first intelligence brief.
+              </p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 28px 0;">
+                <tr>
+                  <td align="center">
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="border-radius: 10px; background: #0f0f0f;">
+                          <a href="${setupUrl}" style="display: inline-block; padding: 14px 36px; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none;">Set Up Your Account</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 0; font-size: 12px; color: #8c8c8c;">
+                This link expires in 7 days. If you did not expect this invitation, you can safely ignore this email.
               </p>
             </td>
           </tr>
           <tr>
-            <td style="border-top: 1px solid #e5e7eb; padding: 20px 32px; background: #f9fafb;">
-              <p style="margin: 0; font-size: 12px; color: #9ca3af;">
-                NexFlow — AI-Powered Engineering Reports. If you have questions, reply to this email.
+            <td style="border-top: 1px solid #e5e5ea; padding: 20px 36px; background: #f7f7f8;">
+              <div style="font-size: 9px; font-weight: 700; letter-spacing: 2px; color: #8c8c8c; text-transform: uppercase; margin-bottom: 4px;">NexFlow</div>
+              <p style="margin: 0; font-size: 10px; color: #8c8c8c;">
+                Embedded AI Engineering Consulting. Reply to this email with questions.
               </p>
             </td>
           </tr>
@@ -257,7 +318,7 @@ export async function sendOnboardingEmail({
   const result = await transporter.sendMail({
     from: process.env.EMAIL_FROM || process.env.SMTP_USER,
     to,
-    subject: `Welcome to NexFlow — Set up ${companyName}`,
+    subject: `Welcome to NexFlow: Set up ${companyName}`,
     html,
   });
 
