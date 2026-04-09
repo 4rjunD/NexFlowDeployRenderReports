@@ -190,8 +190,8 @@ export function computeProgression(
 ): ProgressionSummary | null {
   const reportCount = allPriorContexts.length + 1; // include current
 
-  if (reportCount < 4) {
-    return null;
+  if (allPriorContexts.length === 0) {
+    return null; // need at least 1 prior report for comparison
   }
 
   // Sort contexts oldest-first (last element = most recent prior)

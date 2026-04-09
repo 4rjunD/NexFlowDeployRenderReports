@@ -42,53 +42,10 @@ const INTEGRATIONS = [
     name: "GitHub",
     description: "Pull requests, commits, reviews, and CI data",
     route: "github",
+    comingSoon: false,
     icon: (
       <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
         <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
-      </svg>
-    ),
-  },
-  {
-    type: "SLACK",
-    name: "Slack",
-    description: "Team communication and async patterns",
-    route: "slack",
-    icon: (
-      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z" />
-      </svg>
-    ),
-  },
-  {
-    type: "JIRA",
-    name: "Jira",
-    description: "Issues, sprints, and project tracking",
-    route: "jira",
-    icon: (
-      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23 .262H11.443a5.217 5.217 0 0 0 5.214 5.215h2.129v2.057A5.217 5.217 0 0 0 24 12.749V1.263A1.001 1.001 0 0 0 23 .262z" />
-      </svg>
-    ),
-  },
-  {
-    type: "LINEAR",
-    name: "Linear",
-    description: "Issue and cycle tracking",
-    route: "linear",
-    icon: (
-      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M2.77 17.726a.857.857 0 0 1-.248-.608V6.882c0-.228.09-.447.248-.608l3.504-3.504a.857.857 0 0 1 .608-.248h10.236c.228 0 .447.09.608.248l3.504 3.504c.16.161.248.38.248.608v10.236a.857.857 0 0 1-.248.608l-3.504 3.504a.857.857 0 0 1-.608.248H6.882a.857.857 0 0 1-.608-.248L2.77 17.726zM12 17.143a5.143 5.143 0 1 0 0-10.286 5.143 5.143 0 0 0 0 10.286z" />
-      </svg>
-    ),
-  },
-  {
-    type: "GOOGLE_CALENDAR",
-    name: "Google Calendar",
-    description: "Meeting load and focus time analysis",
-    route: "google",
-    icon: (
-      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M19.5 3h-3V1.5H15V3H9V1.5H7.5V3h-3C3.675 3 3 3.675 3 4.5v15c0 .825.675 1.5 1.5 1.5h15c.825 0 1.5-.675 1.5-1.5v-15c0-.825-.675-1.5-1.5-1.5zm0 16.5h-15V8.25h15v11.25zM7.5 9.75h3v3h-3v-3zm4.5 0h3v3h-3v-3z" />
       </svg>
     ),
   },
@@ -434,15 +391,15 @@ export default function SetupPage() {
               </div>
             </div>
             <div style={{ animation: "fadeSlideIn 0.5s ease 0.5s both" }}>
-              <h2 className="text-2xl font-semibold tracking-tight">Your Report is Being Generated</h2>
+              <h2 className="text-2xl font-semibold tracking-tight">Your First Brief is Being Built</h2>
               <p className="text-white/40 mt-3 leading-relaxed">
-                We&apos;re analyzing your engineering data with AI. Your first report will be delivered to{" "}
-                <span className="text-white/70">{onboardingData?.email}</span> once reviewed.
+                We&apos;re analyzing your engineering data and building your first action brief. It will be delivered to{" "}
+                <span className="text-white/70">{onboardingData?.email}</span> once our team reviews it.
               </p>
             </div>
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/[0.04] border border-white/[0.06] text-sm text-white/30" style={{ animation: "fadeSlideIn 0.5s ease 0.8s both" }}>
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
-              Reports typically arrive within 1-2 business days
+              Briefs typically arrive within 1-2 business days
             </div>
           </div>
         </div>
@@ -503,14 +460,14 @@ export default function SetupPage() {
                       Welcome, {onboardingData.clientName}
                     </h1>
                     <p className="text-white/40 text-lg max-w-md mx-auto leading-relaxed">
-                      Let&apos;s set up <span className="text-white/70">{onboardingData.companyName}</span> on NexFlow in a few quick steps.
+                      Let&apos;s get <span className="text-white/70">{onboardingData.companyName}</span> set up with your embedded AI consulting team.
                     </p>
                   </div>
                   <div className="grid grid-cols-3 gap-4 max-w-lg mx-auto pt-4">
                     {[
                       { num: "1", label: "Connect tools" },
                       { num: "2", label: "Add context" },
-                      { num: "3", label: "Get your report" },
+                      { num: "3", label: "Get your first brief" },
                     ].map((s, i) => (
                       <div key={i} className="text-center space-y-2" style={{ animation: `fadeSlideIn 0.4s ease ${0.3 + i * 0.1}s both` }}>
                         <div className="mx-auto h-10 w-10 rounded-full bg-white/[0.04] border border-white/[0.06] flex items-center justify-center text-sm font-medium text-white/40">{s.num}</div>
@@ -534,7 +491,7 @@ export default function SetupPage() {
                 <div key="connect" className="step-content space-y-6">
                   <div>
                     <h2 className="text-2xl font-semibold tracking-tight">Connect Your Tools</h2>
-                    <p className="text-white/40 mt-1.5">The more you connect, the richer your reports.</p>
+                    <p className="text-white/40 mt-1.5">We use these to build your weekly action briefs and work alongside your team on internal ops.</p>
                   </div>
 
                   <div className="space-y-3">
@@ -594,6 +551,11 @@ export default function SetupPage() {
                                 </button>
                               )}
                             </div>
+                          ) : integration.comingSoon ? (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/[0.06] text-[11px] font-medium text-white/25">
+                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
+                              Coming Soon
+                            </span>
                           ) : (
                             <button
                               onClick={() => handleConnect(integration.type)}
@@ -709,7 +671,7 @@ export default function SetupPage() {
                 <div key="context" className="step-content space-y-6">
                   <div>
                     <h2 className="text-2xl font-semibold tracking-tight">Add Context</h2>
-                    <p className="text-white/40 mt-1.5">Help our AI understand what your team is working on. This is optional but makes your report significantly better.</p>
+                    <p className="text-white/40 mt-1.5">Help us understand what your team is working on. This is optional but makes our consulting briefs significantly more actionable.</p>
                   </div>
 
                   <div className="space-y-3">
@@ -756,7 +718,7 @@ export default function SetupPage() {
                 <div key="launch" className="step-content space-y-8 py-4">
                   <div className="text-center space-y-3">
                     <h2 className="text-2xl font-semibold tracking-tight">Ready to Launch</h2>
-                    <p className="text-white/40 max-w-md mx-auto">Review your setup and generate your first AI-powered engineering report.</p>
+                    <p className="text-white/40 max-w-md mx-auto">Review your setup and we&apos;ll generate your first action brief.</p>
                   </div>
 
                   {/* Summary */}
@@ -778,6 +740,8 @@ export default function SetupPage() {
                                 {integration.type === "GITHUB" && reposSaved ? `${selectedRepos.size} repos` : "Connected"}
                               </span>
                             </div>
+                          ) : integration.comingSoon ? (
+                            <span className="text-xs text-white/20">Coming soon</span>
                           ) : (
                             <span className="text-xs text-white/20">Not connected</span>
                           )}
@@ -814,7 +778,7 @@ export default function SetupPage() {
                         </>
                       ) : (
                         <>
-                          Generate Your First Report
+                          Generate Your First Brief
                           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                         </>
                       )}

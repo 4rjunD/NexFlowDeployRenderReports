@@ -126,13 +126,16 @@ async function main() {
   // Custom message
   const firstName = RECIPIENT_NAME ? RECIPIENT_NAME.split(" ")[0] : "";
   const customMessage =
-    `Your ${reportNumber === 1 ? "first " : ""}engineering brief for ${org.name} is ready. ` +
-    `We dug into your GitHub activity over the past 90 days and found a few things worth talking about.` +
+    `Your ${reportNumber === 1 ? "first " : ""}engineering brief for ${org.name} is ready.` +
     `<br><br>` +
-    `There are some things we need to address on our next call around how code is getting shipped. ` +
-    `Nothing scary, just some quick wins that will save you real headaches down the road.` +
+    `We went through your GitHub activity over the past 90 days and found some gaps that are worth paying attention to. ` +
+    `Code is going to production without review gates, there's no rollback process if something breaks, and there's very little tracking on what's being shipped or why. ` +
+    `These are the kinds of blind spots that quietly compound until they surface as a missed deadline, a bad deploy, or a client-facing issue.` +
     `<br><br>` +
-    `Take a look at the full brief below.`;
+    `Getting this fully cleaned up takes time. It's not a one-week fix. It requires building the right processes, tooling, and habits across your team. ` +
+    `That's exactly what we do at NexFlow. We work alongside your engineering leadership week over week to close these gaps, track progress, and make sure nothing falls through the cracks.` +
+    `<br><br>` +
+    `The full brief below breaks down everything we found and where we'd start. Take a look, and let's find time to walk through it together.`;
 
   console.log("Sending to:", TO_EMAIL);
   console.log("Org:", org.name);
@@ -142,7 +145,7 @@ async function main() {
 
   const result = await sendReportEmail({
     to: TO_EMAIL,
-    subject: `Your Engineering Brief is Ready${firstName ? `, ${firstName}` : ""}`,
+    subject: `${firstName ? `${firstName}, ` : ""}Your Engineering Brief is Ready`,
     reportTitle: `Engineering Brief #${reportNumber}`,
     orgName: org.name,
     kpis,
