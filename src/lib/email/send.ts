@@ -274,13 +274,13 @@ export async function sendOnboardingEmail({
           <tr>
             <td style="padding: 28px 36px;">
               <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.7; color: #3a3a3a;">
-                Your team at <strong>${companyName}</strong> is being onboarded to NexFlow, your embedded AI engineering consulting partner.
+                <strong>${companyName}</strong> is being onboarded to NexFlow, your embedded AI engineering consulting partner.
               </p>
               <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.7; color: #3a3a3a;">
-                We work alongside your engineering leadership to surface blind spots, optimize internal operations, and deliver weekly action briefs that tell you exactly what to focus on.
+                We work alongside your engineering leadership directly inside your codebase &mdash; auditing your workflow, identifying bottlenecks, and implementing improvements hands-on.
               </p>
               <p style="margin: 0 0 24px; font-size: 14px; line-height: 1.7; color: #3a3a3a;">
-                Click below to connect your tools (GitHub, Slack, Jira, Linear) and we'll start building your first intelligence brief.
+                Click below to connect your GitHub and submit your engineering workflow for audit.
               </p>
               <table width="100%" cellpadding="0" cellspacing="0" style="margin: 28px 0;">
                 <tr>

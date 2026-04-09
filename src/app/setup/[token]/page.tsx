@@ -391,15 +391,15 @@ export default function SetupPage() {
               </div>
             </div>
             <div style={{ animation: "fadeSlideIn 0.5s ease 0.5s both" }}>
-              <h2 className="text-2xl font-semibold tracking-tight">Your First Brief is Being Built</h2>
+              <h2 className="text-2xl font-semibold tracking-tight">Submitted for Audit</h2>
               <p className="text-white/40 mt-3 leading-relaxed">
-                We&apos;re analyzing your engineering data and building your first action brief. It will be delivered to{" "}
-                <span className="text-white/70">{onboardingData?.email}</span> once our team reviews it.
+                Your engineering workflow has been submitted to our team. We&apos;ll follow up at{" "}
+                <span className="text-white/70">{onboardingData?.email}</span> with next steps.
               </p>
             </div>
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/[0.04] border border-white/[0.06] text-sm text-white/30" style={{ animation: "fadeSlideIn 0.5s ease 0.8s both" }}>
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
-              Briefs typically arrive within 1-2 business days
+              We&apos;ll be in touch within 1-2 business days
             </div>
           </div>
         </div>
@@ -467,7 +467,7 @@ export default function SetupPage() {
                     {[
                       { num: "1", label: "Connect tools" },
                       { num: "2", label: "Add context" },
-                      { num: "3", label: "Get your first brief" },
+                      { num: "3", label: "Submit for audit" },
                     ].map((s, i) => (
                       <div key={i} className="text-center space-y-2" style={{ animation: `fadeSlideIn 0.4s ease ${0.3 + i * 0.1}s both` }}>
                         <div className="mx-auto h-10 w-10 rounded-full bg-white/[0.04] border border-white/[0.06] flex items-center justify-center text-sm font-medium text-white/40">{s.num}</div>
@@ -490,8 +490,8 @@ export default function SetupPage() {
               {step === "connect" && (
                 <div key="connect" className="step-content space-y-6">
                   <div>
-                    <h2 className="text-2xl font-semibold tracking-tight">Connect Your Tools</h2>
-                    <p className="text-white/40 mt-1.5">We use these to build your weekly action briefs and work alongside your team on internal ops.</p>
+                    <h2 className="text-2xl font-semibold tracking-tight">Connect GitHub</h2>
+                    <p className="text-white/40 mt-1.5">Grant access so our consulting team can audit your engineering workflow and work hands-on inside your codebase.</p>
                   </div>
 
                   <div className="space-y-3">
@@ -671,7 +671,7 @@ export default function SetupPage() {
                 <div key="context" className="step-content space-y-6">
                   <div>
                     <h2 className="text-2xl font-semibold tracking-tight">Add Context</h2>
-                    <p className="text-white/40 mt-1.5">Help us understand what your team is working on. This is optional but makes our consulting briefs significantly more actionable.</p>
+                    <p className="text-white/40 mt-1.5">Help us understand what your team is working on. This is optional but makes our audit significantly more actionable.</p>
                   </div>
 
                   <div className="space-y-3">
@@ -717,8 +717,8 @@ export default function SetupPage() {
               {step === "launch" && (
                 <div key="launch" className="step-content space-y-8 py-4">
                   <div className="text-center space-y-3">
-                    <h2 className="text-2xl font-semibold tracking-tight">Ready to Launch</h2>
-                    <p className="text-white/40 max-w-md mx-auto">Review your setup and we&apos;ll generate your first action brief.</p>
+                    <h2 className="text-2xl font-semibold tracking-tight">Ready to Submit</h2>
+                    <p className="text-white/40 max-w-md mx-auto">Review your setup and submit your engineering workflow for audit.</p>
                   </div>
 
                   {/* Summary */}
@@ -774,17 +774,17 @@ export default function SetupPage() {
                       {requestingReport ? (
                         <>
                           <svg className="h-4 w-4" style={{ animation: "spin 1s linear infinite" }} fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                          Generating Report...
+                          Submitting...
                         </>
                       ) : (
                         <>
-                          Generate Your First Brief
+                          Submit for Audit
                           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                         </>
                       )}
                     </button>
                     <p className="text-xs text-white/20">
-                      Your report will be delivered to {onboardingData.email}
+                      We&apos;ll follow up at {onboardingData.email}
                     </p>
                   </div>
 
