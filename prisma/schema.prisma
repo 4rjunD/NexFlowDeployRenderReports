@@ -57,6 +57,8 @@ model Organization {
   reportPreferences Json?              @default("{}") @map("report_preferences")
   reportSchedule    String?            @default("weekly_monday") @map("report_schedule")
   deliveryConfig    Json?              @map("delivery_config")
+  isTest            Boolean            @default(false) @map("is_test")
+  industry          String?
   clientOnboardings ClientOnboarding[]
   events            Event[]
   integrations      Integration[]
@@ -67,7 +69,18 @@ model Organization {
   sprints           Sprint[]
   teams             Team[]
   users             User[]
+  engagements       Engagement[]
+  transcripts       Transcript[]
+  clientDocuments   ClientDocument[]
+  auditRuns         AuditRun[]
+  agentTasks        AgentTask[]
+  findings          Finding[]
+  recommendations   Recommendation[]
+  deliverables      Deliverable[]
+  messages          Message[]
+  agentArtifacts    AgentArtifact[]
 
+  @@index([isTest])
   @@map("organizations")
 }
 
@@ -320,6 +333,22 @@ enum IntegrationType {
   LINEAR
   SLACK
   GOOGLE_CALENDAR
+  NOTION
+  GOOGLE_DRIVE
+  FATHOM
+  OTTER
+  READ_AI
+  GRANOLA
+  HUBSPOT
+  SALESFORCE
+  STRIPE
+  MIXPANEL
+  POSTHOG
+  INTERCOM
+  NETSUITE
+  META_ADS
+  GOOGLE_ADS
+  LINKEDIN_ADS
 }
 
 enum IntegrationStatus {
@@ -345,6 +374,11 @@ enum ReportType {
   WEEKLY_DIGEST
   SPRINT_RISK
   MONTHLY_HEALTH
+  AUDIT
+  ROADMAP
+  RESEARCH_BRIEF
+  PROGRESS_UPDATE
+  EXECUTIVE_BRIEF
 }
 
 enum ReportStatus {
@@ -384,4 +418,421 @@ enum ReportDepth {
   EXECUTIVE
   STANDARD
   FULL
+}
+
+// =====================================================================
+// Agent Firm Foundation (added 2026-05-09)
+// Supports the multi-agent consulting workflow: per-client engagements,
+// transcript ingestion, agent task queue, findings/recommendations,
+// polished deliverables, inter-agent artifacts.
+// =====================================================================
+
+enum EngagementStatus {
+  PROSPECT
+  PRE_SIGNATURE
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CHURNED
+}
+
+enum EngagementPhase {
+  DISCOVERY
+  AUDIT
+  IMPLEMENTATION
+  ADVISORY
+  FOLLOW_UP
+}
+
+enum TranscriptKind {
+  DISCOVERY_CALL
+  PROGRESS_CALL
+  RETROSPECTIVE
+  ADHOC
+  OTHER
+}
+
+enum DocumentKind {
+  CONTRACT
+  NDA
+  BRIEF
+  REPORT
+  PRESENTATION
+  PDF
+  IMAGE
+  SPREADSHEET
+  OTHER
+}
+
+enum AuditRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELED
+}
+
+enum AgentTaskStatus {
+  PROPOSED
+  QUEUED
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  CANCELED
+}
+
+enum AgentTaskKind {
+  RESEARCH
+  ANALYSIS
+  SYNTHESIS
+  WRITING
+  CODE_CHANGE
+  PRESENTATION
+  COMMUNICATION
+  REVIEW
+  OTHER
+}
+
+enum AgentRunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  TIMEOUT
+}
+
+enum FindingSeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RecommendationStatus {
+  PROPOSED
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+  REJECTED
+  DEFERRED
+}
+
+enum DeliverableKind {
+  AUDIT_REPORT
+  PRESENTATION_DECK
+  ROADMAP
+  CODE_PR
+  PROTOTYPE
+  RESEARCH_BRIEF
+  EXECUTIVE_SUMMARY
+  CONTRACT
+  EMAIL
+  OTHER
+}
+
+enum DeliverableStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  DELIVERED
+  ARCHIVED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageChannel {
+  EMAIL
+  SMS
+  SLACK
+  IN_APP
+  WHATSAPP
+}
+
+enum AgentArtifactKind {
+  RESEARCH_NOTE
+  BRIEFING
+  HYPOTHESIS
+  ANALYSIS
+  DRAFT
+  REVIEW
+  DECISION_LOG
+  QUESTION
+  OTHER
+}
+
+model Engagement {
+  id                  String           @id @default(cuid())
+  orgId               String           @map("org_id")
+  name                String
+  status              EngagementStatus @default(PROSPECT)
+  phase               EngagementPhase  @default(DISCOVERY)
+  contractValue       Decimal?         @map("contract_value") @db.Decimal(10, 2)
+  contractCurrency    String?          @default("USD") @map("contract_currency")
+  signedAt            DateTime?        @map("signed_at")
+  startedAt           DateTime?        @map("started_at")
+  expectedCompleteAt  DateTime?        @map("expected_complete_at")
+  completedAt         DateTime?        @map("completed_at")
+  contextSummary      String?          @map("context_summary")
+  metadata            Json             @default("{}")
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+
+  organization        Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  transcripts         Transcript[]
+  documents           ClientDocument[]
+  auditRuns           AuditRun[]
+  agentTasks          AgentTask[]
+  agentRuns           AgentRun[]
+  findings            Finding[]
+  recommendations     Recommendation[]
+  deliverables        Deliverable[]
+  messages            Message[]
+  agentArtifacts      AgentArtifact[]
+
+  @@index([orgId, status])
+  @@map("engagements")
+}
+
+model Transcript {
+  id            String         @id @default(cuid())
+  engagementId  String         @map("engagement_id")
+  orgId         String         @map("org_id")
+  kind          TranscriptKind @default(DISCOVERY_CALL)
+  title         String?
+  source        String?
+  sourceUrl     String?        @map("source_url")
+  meetingDate   DateTime?      @map("meeting_date")
+  rawText       String         @map("raw_text")
+  summary       String?
+  participants  Json           @default("[]")
+  metadata      Json           @default("{}")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  engagement    Engagement     @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  organization  Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([engagementId])
+  @@map("transcripts")
+}
+
+model ClientDocument {
+  id             String        @id @default(cuid())
+  engagementId   String?       @map("engagement_id")
+  orgId          String        @map("org_id")
+  kind           DocumentKind
+  title          String
+  filePath       String?       @map("file_path")
+  storageUrl     String?       @map("storage_url")
+  contentText    String?       @map("content_text")
+  metadata       Json          @default("{}")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  engagement     Engagement?   @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  organization   Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([engagementId])
+  @@map("client_documents")
+}
+
+model AuditRun {
+  id             String          @id @default(cuid())
+  engagementId   String          @map("engagement_id")
+  orgId          String          @map("org_id")
+  profile        String
+  status         AuditRunStatus  @default(QUEUED)
+  startedAt      DateTime?       @map("started_at")
+  finishedAt     DateTime?       @map("finished_at")
+  inputs         Json            @default("{}")
+  summary        String?
+  riskScore      Float?          @map("risk_score")
+  errorMessage   String?         @map("error_message")
+  metadata       Json            @default("{}")
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  engagement     Engagement      @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  organization   Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  agentRuns      AgentRun[]
+  findings       Finding[]
+
+  @@index([engagementId, status])
+  @@map("audit_runs")
+}
+
+model AgentTask {
+  id              String          @id @default(cuid())
+  engagementId    String          @map("engagement_id")
+  orgId           String          @map("org_id")
+  parentTaskId    String?         @map("parent_task_id")
+  title           String
+  description     String?
+  kind            AgentTaskKind
+  status          AgentTaskStatus @default(PROPOSED)
+  priority        Int             @default(50)
+  assignedAgent   String?         @map("assigned_agent")
+  inputs          Json            @default("{}")
+  output          Json?
+  errorMessage    String?         @map("error_message")
+  startedAt       DateTime?       @map("started_at")
+  completedAt     DateTime?       @map("completed_at")
+  deadline        DateTime?
+  riskLevel       String?         @map("risk_level")
+  metadata        Json            @default("{}")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  engagement      Engagement      @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  organization    Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parentTask      AgentTask?      @relation("AgentTaskSubTasks", fields: [parentTaskId], references: [id], onDelete: SetNull)
+  subTasks        AgentTask[]     @relation("AgentTaskSubTasks")
+  agentRuns       AgentRun[]
+  artifacts       AgentArtifact[]
+
+  @@index([engagementId, status, priority])
+  @@map("agent_tasks")
+}
+
+model AgentRun {
+  id            String          @id @default(cuid())
+  agentTaskId   String?         @map("agent_task_id")
+  auditRunId    String?         @map("audit_run_id")
+  engagementId  String          @map("engagement_id")
+  agentName     String          @map("agent_name")
+  status        AgentRunStatus
+  startedAt     DateTime        @default(now()) @map("started_at")
+  finishedAt    DateTime?       @map("finished_at")
+  inputs        Json?
+  output        Json?
+  tokensUsed    Int?            @map("tokens_used")
+  costUsd       Decimal?        @map("cost_usd") @db.Decimal(10, 4)
+  errorMessage  String?         @map("error_message")
+  metadata      Json            @default("{}")
+
+  agentTask     AgentTask?      @relation(fields: [agentTaskId], references: [id])
+  auditRun      AuditRun?       @relation(fields: [auditRunId], references: [id])
+  engagement    Engagement      @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@index([agentTaskId])
+  @@index([auditRunId])
+  @@map("agent_runs")
+}
+
+model Finding {
+  id             String           @id @default(cuid())
+  engagementId   String           @map("engagement_id")
+  auditRunId     String?          @map("audit_run_id")
+  orgId          String           @map("org_id")
+  agentSource    String           @map("agent_source")
+  category       String
+  severity       FindingSeverity  @default(MEDIUM)
+  title          String
+  description    String
+  evidence       Json             @default("{}")
+  metricValue    Float?           @map("metric_value")
+  confidence     Float?
+  metadata       Json             @default("{}")
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  engagement     Engagement       @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  auditRun       AuditRun?        @relation(fields: [auditRunId], references: [id])
+  organization   Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([engagementId, severity])
+  @@map("findings")
+}
+
+model Recommendation {
+  id                String                @id @default(cuid())
+  engagementId      String                @map("engagement_id")
+  orgId             String                @map("org_id")
+  title             String
+  description       String
+  rationale         String?
+  impactScore       Int?                  @map("impact_score")
+  effortScore       Int?                  @map("effort_score")
+  status            RecommendationStatus  @default(PROPOSED)
+  priorityRank      Int?                  @map("priority_rank")
+  proposedTools     Json?                 @default("[]") @map("proposed_tools")
+  relatedFindings   Json?                 @default("[]") @map("related_findings")
+  metadata          Json                  @default("{}")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+
+  engagement        Engagement            @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  organization      Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([engagementId, status])
+  @@map("recommendations")
+}
+
+model Deliverable {
+  id                  String              @id @default(cuid())
+  engagementId        String              @map("engagement_id")
+  orgId               String              @map("org_id")
+  kind                DeliverableKind
+  status              DeliverableStatus   @default(DRAFT)
+  title               String
+  summary             String?
+  externalUrl         String?             @map("external_url")
+  filePath            String?             @map("file_path")
+  generatedByAgent    String?             @map("generated_by_agent")
+  version             Int                 @default(1)
+  deliveredAt         DateTime?           @map("delivered_at")
+  metadata            Json                @default("{}")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+
+  engagement          Engagement          @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  organization        Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([engagementId, status])
+  @@map("deliverables")
+}
+
+model Message {
+  id             String            @id @default(cuid())
+  engagementId   String?           @map("engagement_id")
+  orgId          String            @map("org_id")
+  direction      MessageDirection
+  channel        MessageChannel
+  subject        String?
+  body           String
+  fromAddress    String?           @map("from_address")
+  toAddress      String?           @map("to_address")
+  threadId       String?           @map("thread_id")
+  agentName      String?           @map("agent_name")
+  metadata       Json              @default("{}")
+  sentAt         DateTime?         @map("sent_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  engagement     Engagement?       @relation(fields: [engagementId], references: [id])
+  organization   Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@index([threadId])
+  @@map("messages")
+}
+
+model AgentArtifact {
+  id                    String              @id @default(cuid())
+  engagementId          String              @map("engagement_id")
+  orgId                 String              @map("org_id")
+  agentTaskId           String?             @map("agent_task_id")
+  authorAgent           String              @map("author_agent")
+  kind                  AgentArtifactKind
+  title                 String
+  body                  String
+  referencedArtifacts   Json                @default("[]") @map("referenced_artifacts")
+  metadata              Json                @default("{}")
+  createdAt             DateTime            @default(now()) @map("created_at")
+
+  engagement            Engagement          @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  organization          Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  agentTask             AgentTask?          @relation(fields: [agentTaskId], references: [id])
+
+  @@index([engagementId, kind])
+  @@map("agent_artifacts")
 }
